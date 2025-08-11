@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  ocpp-server:
+    build: .
+    container_name: ocpp-server
+    ports:
+      - "8000:8000"   # Dashboard (FastAPI)
+      - "9000:9000"   # OCPP WebSocket
+    restart: unless-stopped
