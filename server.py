@@ -873,6 +873,67 @@ async def local_start_transaction_api(data: dict):
     """
     API endpoint to simulate a local start from the Charge Point.
     """
+
+        try:
+        response = await charge_point.remote_stop_transaction(transaction_id)
+        return {"status": "success", "response": response}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/charge/start")
+async def charge_start(data: dict):
+    """
+    เริ่มชาร์จแบบง่าย
+    body: {"charge_point_id":"CP001","connector_id":1,"id_tag":"TAG_1234"}
+    """
+    cp_id = data.get("charge_point_id")
+    connector_id = data.get("connector_id")
+    id_tag = data.get("id_tag")
+
+    if not cp_id or connector_id is None or not id_tag:
+        raise HTTPException(status_code=400, detail="ต้องมี charge_point_id, connector_id และ id_tag")
+
+    if cp_id not in connected_charge_points:
+        raise HTTPException(status_code=404, detail="ไม่พบ Charge Point")
+
+    cp = connected_charge_points[cp_id]
+    resp = await cp.remote_start_transaction(id_tag=id_tag, connector_id=int(connector_id))
+    return {"status": "sent", "response": resp}
+
+
+@app.post("/api/charge/stop")
+async def charge_stop(data: dict):
+    """
+    หยุดชาร์จแบบง่าย
+    body: {"charge_point_id":"CP001","connector_id":1}
+    (ระบบจะหา transaction_id ที่กำลังวิ่งจากสถานะของหัวนั้นให้เอง)
+    """
+    cp_id = data.get("charge_point_id")
+    connector_id = data.get("connector_id")
+
+    if not cp_id or connector_id is None:
+        raise HTTPException(status_code=400, detail="ต้องมี charge_point_id และ connector_id")
+
+    if cp_id not in connected_charge_points:
+        raise HTTPException(status_code=404, detail="ไม่พบ Charge Point")
+
+    cp = connected_charge_points[cp_id]
+    conn = cp.connectors.get(int(connector_id))
+    if not conn or not conn.get("transaction_id"):
+        raise HTTPException(status_code=409, detail="หัวชาร์จนี้ไม่มีธุรกรรมที่กำลังทำงานอยู่")
+
+    tx_id = conn["transaction_id"]
+    resp = await cp.remote_stop_transaction(transaction_id=int(tx_id))
+    return {"status": "sent", "transaction_id": tx_id, "response": resp}
+
+
+@app.post("/api/get_diagnostics")
+async def get_diagnostics_api(data: dict):
+    """
+    API endpoint to send a GetDiagnostics.req to the specified Charge Point.
+    """
+
     cp_id = data.get('charge_point_id')
     connector_id = data.get('connector_id')
     id_tag = data.get('id_tag')
