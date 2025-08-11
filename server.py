@@ -40,6 +40,16 @@ CONFIGURATION_SETTINGS = {
 # --- Mock list of authorized ID tags ---
 AUTHORIZED_ID_TAGS = ['TAG_1234', 'TAG_AABBCC']
 
+# --- Auto-stop config (low power sustained) ---
+AUTO_STOP_CFG = {
+    "enabled": True,
+    "threshold_kw": 0.80,      # กำลังไฟต่ำกว่าเท่านี้ถือว่า "ต่ำ"
+    "duration_sec": 180        # ต่ำต่อเนื่องกี่วินาทีถึงจะหยุด
+}
+
+# ติดตามช่วงเวลาที่ "ต่ำ" ต่อเนื่องสำหรับแต่ละหัวชาร์จระหว่างธุรกรรม
+# key = (cp_id, connector_id) -> {"below_since": datetime|None}
+LOW_POWER_TRACK = {}
 
 # ------------------ FastAPI Dashboard ------------------
 app = FastAPI()
@@ -1206,7 +1216,7 @@ class ChargePoint(BaseChargePoint):
         transaction_id = kwargs.get('transaction_id')
         if not transaction_id:
             transaction_id = int(time.time())
-
+   
         if connector_id in self.connectors:
             self.connectors[connector_id]['status'] = 'Charging'
             self.connectors[connector_id]['transaction_id'] = transaction_id
@@ -1215,6 +1225,12 @@ class ChargePoint(BaseChargePoint):
         msg = f"[StartTransaction] {self.id} | หัวชาร์จ: {connector_id}, idTag: {id_tag}, ธุรกรรม ID: {transaction_id}"
         print(msg)
         await self.notify_dashboard(msg)
+
+        # --- Auto-stop tracker: reset/arm on start ---
+        try:
+            LOW_POWER_TRACK[(self.id, connector_id)] = {"below_since": None}
+        except Exception:
+            pass
 
         return call_result.StartTransactionPayload(
             id_tag_info={'status': AuthorizationStatus.accepted},
@@ -1229,10 +1245,15 @@ class ChargePoint(BaseChargePoint):
             self.connectors[connector_id]['transaction_id'] = None
             self.connectors[connector_id]['last_heard'] = datetime.utcnow()
 
+        # --- Auto-stop tracker: clear on stop ---
+        try:
+            LOW_POWER_TRACK.pop((self.id, connector_id), None)
+        except Exception:
+            pass
+
         msg = f"[StopTransaction] {self.id} | หัวชาร์จ: {connector_id}, ธุรกรรม ID: {transaction_id}, สถานะ: เสร็จสิ้น"
         print(msg)
         await self.notify_dashboard(msg)
-
         return call_result.StopTransactionPayload(
             id_tag_info={'status': AuthorizationStatus.accepted}
         )
@@ -1256,6 +1277,47 @@ class ChargePoint(BaseChargePoint):
         msg = f"[MeterValues] {self.id} | หัวชาร์จ: {connector_id}, กำลังไฟ: {power_kw:.2f} kW"
         print(msg)
         await self.notify_dashboard(msg)
+
+        # --- Auto-stop: low power sustained ---
+        if AUTO_STOP_CFG.get("enabled", False):
+            key = (self.id, connector_id)
+            track = LOW_POWER_TRACK.get(key)
+            # ต้องมีธุรกรรมกำลังวิ่งอยู่ถึงจะตรวจ auto stop
+            tx_id = None
+            if connector_id in self.connectors:
+                tx_id = self.connectors[connector_id].get("transaction_id")
+
+            if track is not None and tx_id:
+                current_kw = self.connectors[connector_id].get("power_kw") or 0.0
+                threshold = float(AUTO_STOP_CFG.get("threshold_kw", 0.8))
+                window_sec = int(AUTO_STOP_CFG.get("duration_sec", 180))
+
+                now = datetime.utcnow()
+                below = current_kw < threshold
+
+                if below:
+                    # เริ่มจับเวลาเมื่อเข้าสู่โซนต่ำครั้งแรก
+                    if track.get("below_since") is None:
+                        track["below_since"] = now
+                    else:
+                        elapsed = (now - track["below_since"]).total_seconds()
+                        if elapsed >= window_sec:
+                            # ถึงเวลา auto stop
+                            try:
+                                await self.notify_dashboard(
+                                    f"[AutoStop] {self.id} c{connector_id}: "
+                                    f"low power {current_kw:.2f}kW < {threshold:.2f}kW "
+                                    f"for {int(elapsed)}s -> RemoteStopTransaction({tx_id})"
+                                )
+                                await self.remote_stop_transaction(transaction_id=int(tx_id))
+                            except Exception as e:
+                                await self.notify_dashboard(f"[AutoStop][ERR] remote_stop: {e}")
+                            finally:
+                                # รีเซ็ต tracker เพื่อไม่ให้ยิงซ้ำหากฝั่ง CP ยังส่งค่าเดิมมา
+                                track["below_since"] = None
+                else:
+                    # กลับมาสูงกว่าเกณฑ์ รีเซ็ตตัวจับเวลา
+                    track["below_since"] = None
 
         return call_result.MeterValuesPayload()
 
