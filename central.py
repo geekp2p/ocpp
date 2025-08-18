@@ -308,7 +308,7 @@ async def main():
                 return
             if not cmd:
                 continue
-            parts = cmd split()
+            parts = cmd.split()
             if parts[0] == "ls":
                 print("Connected CPs:", ", ".join(connected_cps.keys()) or "(none)")
                 continue
