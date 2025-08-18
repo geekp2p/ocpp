@@ -44,6 +44,36 @@ python central.py
 - `GET /api/v1/active` คืนรายการ `cpid`, `connectorId`, `idTag`, `transactionId` ที่กำลังมีธุรกรรมอยู่
 ทุกเอ็นด์พอยต์ต้องใส่ header `X-API-Key` (ค่าเริ่มต้นคือ `changeme-123`).
 
+### ตัวอย่างเรียกด้วย `curl`
+
+#### 1. ใช้ `vid` อย่างเดียว
+
+```bash
+curl -X POST http://<host>:8080/api/v1/start_vid \
+  -H "X-API-Key: changeme-123" \
+  -H "Content-Type: application/json" \
+  -d '{"vid":"1.2"}'
+
+curl -X POST http://<host>:8080/api/v1/stop_vid \
+  -H "X-API-Key: changeme-123" \
+  -H "Content-Type: application/json" \
+  -d '{"vid":"1.2"}'
+```
+
+#### 2. ระบุ `cpid`/`connectorId` และ argument เพิ่มเติม
+
+```bash
+curl -X POST http://<host>:8080/api/v1/start \
+  -H "X-API-Key: changeme-123" \
+  -H "Content-Type: application/json" \
+  -d '{"cpid":"CP_001","connectorId":1,"idTag":"TAG_1234","vid":"1.2","kv":"mode=fast,tag=special"}'
+
+curl -X POST http://<host>:8080/api/v1/stop \
+  -H "X-API-Key: changeme-123" \
+  -H "Content-Type: application/json" \
+  -d '{"cpid":"CP_001","connectorId":1,"transactionId":3,"vid":"1.2","kv":"mode=fast,tag=special"}'
+`
+
 บนคอนโซลที่รัน `central.py` สามารถสั่งได้ เช่น
 ```
 start CP_001 1 TAG_1234  # เริ่มชาร์จ
@@ -75,11 +105,6 @@ go run start_stop.go start CP_001 1 TAG_1234 3 1.2 mode=fast,tag=special
 
 # หยุดชาร์จโดยใช้ transactionId และ vid
 go run start_stop.go stop  CP_001 1 TAG_1234 3 1.2
-
-# แบบสั้นสุด สนใจแค่ว่ารถคันไหน [ไม่แน่ใจว่าได้ไหม]
-go run start_stop.go start <vid>
-go run start_stop.go stop  <vid>
-
 ```
 หากได้รับ `context deadline exceeded` แสดงว่าไม่สามารถเชื่อมต่อถึงเซิร์ฟเวอร์ (อาจเพราะเซิร์ฟเวอร์ไม่ทำงานหรือถูกไฟร์วอลล์บล็อก).
 
@@ -176,7 +201,6 @@ netsh advfirewall firewall add rule name="Allow OCPP 9000" dir=in action=allow p
 ```
 
 ## หมายเหตุ
-
 - เปลี่ยนค่า `API_KEY` ใน `central.py` และ `apiKey` ใน `start_stop.go` ก่อนใช้งานจริง
 
 # รายการงาน (Checklist)
@@ -194,4 +218,5 @@ netsh advfirewall firewall add rule name="Allow OCPP 9000" dir=in action=allow p
 - เพิ่มชุดทดสอบอัตโนมัติ (unit tests) และการตั้งค่า CI
 - ปรับปรุงเอกสารให้ครอบคลุมการใช้งาน cp_simulator.py และ HTTP API
 - เสริมมาตรการความปลอดภัย เช่น ปรับเปลี่ยน API_KEY และการยืนยันตัวตนอื่น ๆ
+
 
