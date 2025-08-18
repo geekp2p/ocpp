@@ -57,11 +57,24 @@ ls                      # แสดง CP ที่เชื่อมต่อ
 
 ตัวอย่างคำสั่ง:
 ```bash
-# เริ่มชาร์จด้วย cpid/connectorId (idTag และ transactionId เป็นออปชัน)
-go run start_stop.go start <cpid> <connectorId> [idTag] [transactionId]
+# เริ่มชาร์จด้วย cpid/connectorId (idTag, transactionId, vid และ kv เป็นออปชัน)
+go run start_stop.go start <cpid> <connectorId> [idTag] [transactionId] [vid] [kv]
 
-# หยุดชาร์จโดยระบุ cpid และ connectorId (หรือเพิ่ม idTag/transactionId)
-go run start_stop.go stop <cpid> <connectorId> [idTag] [transactionId]
+# หยุดชาร์จโดยระบุ cpid และ connectorId (หรือเพิ่ม idTag/transactionId/vid/kv)
+go run start_stop.go stop <cpid> <connectorId> [idTag] [transactionId] [vid] [kv]
+
+# ตัวอย่างสั้นที่สุด (ใช้ค่า idTag ดีฟอลต์ และ /charge/stop)
+go run start_stop.go start CP_001 1
+go run start_stop.go stop  CP_001 1
+
+# เริ่มชาร์จพร้อม idTag และ vid
+go run start_stop.go start CP_001 1 TAG_1234 3 1.2
+
+# เริ่มชาร์จพร้อม vid และ kv หลายค่า
+go run start_stop.go start CP_001 1 TAG_1234 3 1.2 mode=fast,tag=special
+
+# หยุดชาร์จโดยใช้ transactionId และ vid
+go run start_stop.go stop  CP_001 1 TAG_1234 3 1.2
 ```
 หากได้รับ `context deadline exceeded` แสดงว่าไม่สามารถเชื่อมต่อถึงเซิร์ฟเวอร์ (อาจเพราะเซิร์ฟเวอร์ไม่ทำงานหรือถูกไฟร์วอลล์บล็อก).
 
