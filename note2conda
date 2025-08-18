@@ -1,0 +1,4 @@
+conda create -n ocpp-cp-sim python=3.11 -y
+conda activate ocpp-cp-sim
+pip install ocpp==2.1.0 websockets
+python your_script.py
