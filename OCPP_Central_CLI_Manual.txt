@@ -1,0 +1,242 @@
+# คู่มือใช้งาน OCPP Central + CLI
+
+## 1) ภาพรวม
+สแต็กนี้มี 3 ส่วนหลัก  
+- **Central Server (`central.py`)**: เปิด WebSocket ให้ตู้ชาร์จเชื่อมต่อ OCPP 1.6J และเปิด **HTTP API** ให้ฝั่งแอป/สคริปต์สั่ง Start/Stop และดูสถานะ  
+- **Go CLI**: ชุดคำสั่ง `start_stop.go`, `list_active.go` สำหรับสั่งงานผ่าน HTTP API  
+- **ตัวจำลองหัวชาร์จ (`cp_simulator.py`)**: ใช้ทดสอบแบบไม่ต้องมีฮาร์ดแวร์จริง
+
+---
+
+## 2) เตรียมสภาพแวดล้อม (Python & Go)
+```bash
+# Python (Conda)
+conda env create -f environment.yml
+conda activate ocpp-central
+
+# Go (run ตรง หรือ build เป็นไบนารี)
+go run start_stop.go
+# หรือ
+go build -o start-stop-cli start_stop.go
+```
+> แนะนำ Go 1.20+ และ Python 3.10+ (หรือเวอร์ชันตามที่ระบุใน `environment.yml`)
+
+---
+
+## 3) การตั้งค่าพื้นฐาน
+- **API Base URL (HTTP API):** `http://<host>:8080`
+- **WebSocket URL (OCPP):** `ws://<host>:9000/ocpp/<ChargePointID>`
+- **HTTP Header ที่ต้องมี:** `X-API-Key: <your-api-key>`
+
+> ถ้าใช้ Go CLI จากตัวอย่าง ให้ตรวจค่าคงที่ในไฟล์ (เช่น `apiBase`, `apiKey`)  
+> ตัวอย่าง (ปรับตามระบบจริง):  
+> `apiBase = "http://45.136.236.186:8080/api/v1"` และ `apiKey = "changeme-123"`
+
+---
+
+## 4) รัน Central Server
+```bash
+python central.py
+```
+เมื่อรันสำเร็จ:
+- **WebSocket (OCPP):** `ws://<host>:9000/ocpp/<ChargePointID>`
+- **HTTP API:** `http://<host>:8080`
+
+> ตั้งค่าที่ตู้ให้ชี้ไปยัง URL ข้างต้น โดยกำหนด `<ChargePointID>` ให้ตรง (เช่น `CP_001`)
+
+---
+
+## 5) HTTP API (ต้องมี Header `X-API-Key`)
+### เริ่มชาร์จ
+- `POST /api/v1/start`
+```bash
+curl -X POST http://<host>:8080/api/v1/start \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <your-api-key>" \
+  -d '{"cpid":"CP_001","connectorId":1,"idTag":"TAG_1234"}'
+```
+
+### หยุดชาร์จ
+- รุ่นโค้ดนี้ใช้ `POST /charge/stop` (หยุดด้วย `cpid + connectorId`)
+```bash
+curl -X POST http://<host>:8080/charge/stop \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <your-api-key>" \
+  -d '{"cpid":"CP_001","connectorId":1}'
+```
+> หมายเหตุ: ถ้าเรียก `/api/v1/stop` แล้วได้ 404 ให้สลับมาใช้ `/charge/stop`
+
+### ดูรายการที่กำลังชาร์จอยู่
+- `GET /api/v1/active`
+```bash
+curl -X GET http://<host>:8080/api/v1/active \
+  -H "X-API-Key: <your-api-key>"
+```
+
+---
+
+## 6) คอนโซลคำสั่งฝั่ง Central (`central.py`)
+พิมพ์คำสั่งในเทอร์มินัลที่รัน `central.py`:
+```
+start <cpid> <connector> <idTag>
+stop  <cpid> <txId>
+ls
+map <cpid>
+```
+ตัวอย่าง:
+```
+start CP_001 1 TAG_1234
+stop  CP_001 42
+ls
+map CP_001
+```
+
+---
+
+## 7) Go CLI: Start/Stop ผ่าน HTTP
+```bash
+# เริ่มชาร์จ
+go run start_stop.go start <cpid> <connectorId> <idTag>
+
+# หยุดชาร์จ (ระบุ cpid + connectorId)
+go run start_stop.go stop  <cpid> <connectorId>
+```
+ตัวอย่าง:
+```bash
+go run start_stop.go start CP_001 1 TAG_1234
+go run start_stop.go stop  CP_001 1
+```
+> หาก build แล้ว:
+```bash
+./start-stop-cli start <cpid> <connectorId> <idTag>
+./start-stop-cli stop  <cpid> <connectorId>
+```
+
+---
+
+## 8) Go CLI: ดูรายการที่กำลังชาร์จ
+```bash
+go run list_active.go
+```
+**ผลลัพธ์:** แสดง `cpid connectorId idTag transactionId` ของรายการที่ Active
+
+---
+
+## 9) Python สคริปต์: ดูรายการที่กำลังชาร์จ
+```bash
+python list_active.py
+```
+**ผลลัพธ์:** แสดง `cpid connectorId idTag` (หรือข้อมูลเพิ่มเติมตามที่สคริปต์กำหนด)
+
+---
+
+## 10) จำลองหัวชาร์จ (Charge Point Simulator)
+```bash
+python cp_simulator.py
+```
+- ตัวจำลองจะเชื่อมต่อ `ws://<host>:9000/ocpp/<ChargePointID>`
+- ใช้ทดสอบ Start/Stop/Active ร่วมกับ Central Server ได้
+
+---
+
+## 11) เครื่องมือวินิจฉัย/ตั้งค่า Windows Firewall
+ตรวจสุขภาพ HTTP API:
+```bash
+python windows_fw_diagnose.py --ip 45.136.236.186 --port 8080 --path /api/v1/health
+```
+เปิดรับ INBOUND ให้พอร์ต OCPP (9000):
+```bash
+python windows_fw_diagnose.py --ip 45.136.236.186 --port 9000 --fix allow-in
+```
+> ควรใช้สิทธิ์ Administrator และตรวจว่า `http://<host>:8080/api/v1/health` ตอบปกติ
+
+---
+
+## 12) ลำดับการทดสอบแบบครบวงจร
+```bash
+# 1) รันเซิร์ฟเวอร์
+python central.py
+
+# 2) รันตัวจำลอง (เช่น CP_001)
+python cp_simulator.py
+
+# 3) เริ่มชาร์จ (HTTP หรือ Go CLI)
+curl -X POST http://<host>:8080/api/v1/start \
+  -H "Content-Type: application/json" -H "X-API-Key: <key>" \
+  -d '{"cpid":"CP_001","connectorId":1,"idTag":"TAG_1234"}'
+# หรือ
+go run start_stop.go start CP_001 1 TAG_1234
+
+# 4) ตรวจรายการ Active
+curl -H "X-API-Key: <key>" http://<host>:8080/api/v1/active
+# หรือ
+go run list_active.go
+
+# 5) หยุดชาร์จ
+curl -X POST http://<host>:8080/charge/stop \
+  -H "Content-Type: application/json" -H "X-API-Key: <key>" \
+  -d '{"cpid":"CP_001","connectorId":1}'
+# หรือ
+go run start_stop.go stop CP_001 1
+```
+
+---
+
+## 13) Troubleshooting
+- **404 เมื่อเรียก `/api/v1/stop`** → เปลี่ยนไปใช้ `POST /charge/stop`
+- **`context deadline exceeded` / `Client.Timeout exceeded while awaiting headers`**  
+  - ตรวจว่า `central.py` รันอยู่จริง  
+  - เช็ก `curl http://<host>:8080/api/v1/health`  
+  - เปิดพอร์ต/ไฟร์วอลล์ตามข้อ 11
+- **WebSocket ต่อไม่ได้**  
+  - ตรวจ URL ให้เป็น `.../ocpp/<ChargePointID>`  
+  - พอร์ต 9000 เปิดรับ  
+  - เวลาระบบตรง
+- **RemoteStart ไม่สำเร็จ**  
+  - CP ต้องอยู่สถานะ `Available`  
+  - `idTag` ผ่านการอนุญาต  
+  - `connectorId` ถูกต้องและไม่ติดการใช้งาน
+
+---
+
+## 14) ความปลอดภัย
+- เก็บ `X-API-Key` ให้ดี หลีกเลี่ยงการฝังค่าจริงในโค้ดสาธารณะ  
+- หากเปิดอินเทอร์เน็ตสาธารณะ พิจารณา reverse proxy + HTTPS + IP allowlist  
+- ปิด/จำกัดพอร์ตทดสอบเมื่อเสร็จงาน
+
+---
+
+## 15) สรุปคำสั่งหลัก (โหมดสั้น)
+```bash
+# Setup
+conda env create -f environment.yml
+conda activate ocpp-central
+go run start_stop.go   # หรือ go build start_stop.go
+
+# Run Central
+python central.py
+# WS:  ws://<host>:9000/ocpp/<ChargePointID>
+# API: http://<host>:8080  (ใส่ X-API-Key)
+
+# HTTP API
+POST /api/v1/start
+POST /charge/stop
+GET  /api/v1/active
+
+# Central Console
+start <cpid> <connector> <idTag>
+stop  <cpid> <txId>
+ls
+map <cpid>
+
+# Go CLI
+go run start_stop.go start <cpid> <connectorId> <idTag>
+go run start_stop.go stop  <cpid> <connectorId>
+go run list_active.go
+
+# Python Utilities
+python list_active.py
+python cp_simulator.py
+python windows_fw_diagnose.py --ip 45.136.236.186 --port 8080 --path /api/v1/health
+python windows_fw_diagnose.py --ip 45.136.236.186 --port 9000 --fix allow-in
+```
