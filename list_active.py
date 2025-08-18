@@ -26,7 +26,9 @@ def main() -> None:
         print("no active sessions")
         return
     for s in sessions:
-        print(f"{s.get('cpid')} {s.get('connectorId')} {s.get('idTag')}")
+        print(
+            f"{s.get('cpid')} {s.get('connectorId')} {s.get('idTag')} {s.get('transactionId')}"
+        )
 
 
 if __name__ == "__main__":

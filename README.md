@@ -5,9 +5,9 @@
 ## โครงสร้างหลัก
 
 - `central.py` – เซิร์ฟเวอร์ WebSocket/HTTP API ที่รวมฟังก์ชัน Remote Start/Stop และคอนโซลคำสั่งเบื้องต้น
-- `start_stop.go` – โค้ด Go ที่เรียก HTTP API `/api/v1/start` และ `/charge/stop`
-- `list_active.go` – ตัวอย่าง Go สำหรับดึงรายการธุรกรรมที่กำลังชาร์จอยู่จาก `/api/v1/active`
-- `list_active.py` – สคริปต์ Python สำหรับเรียกดู `cpid`, `connectorId`, `idTag` ที่กำลังเชื่อมต่อ
+- `start_stop.go` – โค้ด Go ที่เรียก HTTP API `/api/v1/start` และ `/charge/stop`␊
+- `list_active.go` – ตัวอย่าง Go สำหรับดึงรายการธุรกรรมที่กำลังชาร์จอยู่จาก `/api/v1/active`␊
+- `list_active.py` – สคริปต์ Python สำหรับเรียกดู `cpid`, `connectorId`, `idTag`, `transactionId` ที่กำลังเชื่อมต่อ
 - `cp_simulator.py` – ตัวจำลองหัวชาร์จอย่างง่ายสำหรับเชื่อมต่อทดสอบ
 - `windows_fw_diagnose.py` – สคริปต์ PowerShell/Python สำหรับตรวจ/แก้ไข Windows Firewall
 
@@ -40,7 +40,7 @@ python central.py
 ตัวอย่างส่วนของ API:
 - `POST /api/v1/start` ส่งคำสั่ง RemoteStartTransaction ให้หัวชาร์จที่เชื่อมต่ออยู่␊
 - `POST /charge/stop` หยุดชาร์จโดยระบุ `cpid` และ `connectorId` (ไม่ต้องทราบ transactionId)
-- `GET /api/v1/active` คืนรายการ `cpid`, `connectorId`, `idTag` ที่กำลังมีธุรกรรมอยู่
+- `GET /api/v1/active` คืนรายการ `cpid`, `connectorId`, `idTag`, `transactionId` ที่กำลังมีธุรกรรมอยู่
 ทุกเอ็นด์พอยต์ต้องใส่ header `X-API-Key` (ค่าเริ่มต้นคือ `changeme-123`).
 
 บนคอนโซลที่รัน `central.py` สามารถสั่งได้ เช่น
@@ -52,9 +52,15 @@ ls                      # แสดง CP ที่เชื่อมต่อ
 
 ## การใช้งาน `start_stop.go`␊
 
-ไฟล์ Go นี้ใช้เรียก HTTP API จากระยะไกล โดยค่าเริ่มต้นจะชี้ไปยัง `http://45.136.236.186:8080`.  ปรับ `apiBase` หรือ `apiKey` ในไฟล์ได้ตามต้องการ
+ไฟล์ Go นี้ใช้เรียก HTTP API `/api/v1/start` และ `/charge/stop` จากระยะไกล โดยค่าเริ่มต้นจะชี้ไปยัง `http://45.136.236.186:8080`. ปรับ `apiBase` หรือ `apiKey` ในไฟล์ได้ตามต้องการ
+
+ตัวอย่างคำสั่ง:
 ```bash
-go run start_stop.go
+# เริ่มชาร์จ
+go run start_stop.go start <cpid> <connectorId> <idTag>
+
+# หยุดชาร์จผ่าน /charge/stop โดยระบุ cpid และ connectorId
+go run start_stop.go stop <cpid> <connectorId>
 ```
 หากได้รับ `context deadline exceeded` แสดงว่าไม่สามารถเชื่อมต่อถึงเซิร์ฟเวอร์ (อาจเพราะเซิร์ฟเวอร์ไม่ทำงานหรือถูกไฟร์วอลล์บล็อก).
 
@@ -82,4 +88,3 @@ netsh advfirewall firewall add rule name="Allow OCPP 9000" dir=in action=allow p
 
 ## หมายเหตุ
 - เปลี่ยนค่า `API_KEY` ใน `central.py` และ `apiKey` ใน `start_stop.go` ก่อนใช้งานจริง
-- หากต้องการใช้โดเมน/พอร์ตอื่น ให้แก้ไขค่าที่เกี่ยวข้องในไฟล์โค้ดต่าง ๆ

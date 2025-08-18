@@ -210,6 +210,7 @@ class CentralSystem(ChargePoint):
 #        HTTP CONTROL API
 # ================================
 API_KEY = "changeme-123"  # เปลี่ยนเป็นค่า secret ของคุณ
+DEFAULT_ID_TAG = "DEMO_IDTAG"
 
 app = FastAPI(title="OCPP Central Control API", version="1.0.0")
 
@@ -233,11 +234,12 @@ def health():
 class StartReq(BaseModel):
     cpid: str
     connectorId: int
-    idTag: str
+    idTag: str | None = None
 
 class StopReq(BaseModel):
     cpid: str
     transactionId: int
+    connectorId: int | None = None
 
 class StopByConnectorReq(BaseModel):
     cpid: str
@@ -260,7 +262,8 @@ async def api_start(req: StartReq, x_api_key: str | None = Header(default=None, 
     if not cp:
         raise HTTPException(status_code=404, detail=f"ChargePoint '{req.cpid}' not connected")
     try:
-        await cp.remote_start(req.connectorId, req.idTag)
+        id_tag = req.idTag or DEFAULT_ID_TAG
+        await cp.remote_start(req.connectorId, id_tag)
         # ถ้า charger รับ จะตามด้วย StartTransaction.req → เราจะ assign transactionId ให้เอง
         return {"ok": True, "message": "RemoteStartTransaction sent"}
     except Exception as e:
@@ -268,6 +271,7 @@ async def api_start(req: StartReq, x_api_key: str | None = Header(default=None, 
 
 @app.post("/api/v1/stop")
 async def api_stop(req: StopReq, x_api_key: str | None = Header(default=None, alias="X-API-Key")):
+    require_key(x_api_key)
     cp = connected_cps.get(req.cpid)
     if not cp:
         raise HTTPException(status_code=404, detail=f"ChargePoint '{req.cpid}' not connected")
