@@ -292,11 +292,6 @@ class StopReq(BaseModel):
     kvMap: Dict[str, str] | None = None
     hash: str | None = None
 
-class StopReq(BaseModel):
-    cpid: str
-    transactionId: int
-    connectorId: int | None = None
-
 class StopByConnectorReq(BaseModel):
     cpid: str
     connectorId: int

@@ -65,6 +65,29 @@ go run start_stop.go stop <cpid> <connectorId> [idTag] [transactionId]
 ```
 หากได้รับ `context deadline exceeded` แสดงว่าไม่สามารถเชื่อมต่อถึงเซิร์ฟเวอร์ (อาจเพราะเซิร์ฟเวอร์ไม่ทำงานหรือถูกไฟร์วอลล์บล็อก).
 
+### รูปแบบข้อมูล/แฮช สำหรับคำสั่ง Start/Stop
+
+ทั้ง `POST /api/v1/start` และ `POST /api/v1/stop` รองรับการตรวจสอบ `hash` โดยประกอบ canonical string ตามลำดับดังนี้:
+
+```
+1: <cpid>
+2: <connectorId>
+3: <idTag-or-'-'>
+4: <transactionId-or-'-'>
+5: <timestamp-or-'-'>     # ใช้รูปแบบ UNIX: unix:<sec[.frac]>
+6: <vid-or-'-'>
+7: <kv-or-'-'>            # key=value[,key=value]*  (ตัดคีย์ hash ออกตอนคำนวณ)
+8: <hash-or-'-'>          # SHA-256 hex ของ canonical string
+```
+
+canonical string ที่นำไปคำนวณ hash คือ
+
+```
+<cpid>|<connectorId>|<idTag-or-'-'>|<transactionId-or-'-'>|<timestamp-or-'-'>|<vid-or-'-'>|<kv-or-'-'>
+```
+
+ค่าที่ไม่ส่งให้แทนด้วย `-` และ `kv` จะถูกเรียงตามชื่อ key (ละเว้น key `hash`) ก่อนนำมาประกอบ canonical string แล้วจึงคำนวณค่า `hash` ด้วย SHA-256.
+
 ## การใช้งาน `cp_simulator.py`
 
 สคริปต์นี้จำลองหัวชาร์จ ID `CP_001` และเชื่อมต่อไปยังเซิร์ฟเวอร์ที่ `ws://45.136.236.186:9000/ocpp/CP_001` เพื่อใช้ทดสอบคำสั่ง Start/Stop จาก API
