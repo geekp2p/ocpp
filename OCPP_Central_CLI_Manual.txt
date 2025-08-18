@@ -95,21 +95,29 @@ map CP_001
 
 ## 7) Go CLI: Start/Stop ผ่าน HTTP
 ```bash
-# เริ่มชาร์จ
-go run start_stop.go start <cpid> <connectorId> <idTag>
+# เริ่มชาร์จด้วย cpid/connectorId (idTag และ transactionId ใส่หรือไม่ใส่ก็ได้)
+go run start_stop.go start <cpid> <connectorId> [idTag] [transactionId]
+# หรือเริ่มชาร์จด้วย vid ไม่ต้องระบุ connector
+go run start_stop.go start <vid>
 
-# หยุดชาร์จ (ระบุ cpid + connectorId)
-go run start_stop.go stop  <cpid> <connectorId>
+# หยุดชาร์จ (ระบุ cpid + connectorId หรือเพิ่ม idTag/transactionId)
+go run start_stop.go stop  <cpid> <connectorId> [idTag] [transactionId]
+# หรือหยุดชาร์จด้วย vid
+go run start_stop.go stop  <vid>
 ```
 ตัวอย่าง:
 ```bash
 go run start_stop.go start CP_001 1 TAG_1234
 go run start_stop.go stop  CP_001 1
+go run start_stop.go start VID_999
+go run start_stop.go stop  VID_999
 ```
 > หาก build แล้ว:
 ```bash
-./start-stop-cli start <cpid> <connectorId> <idTag>
-./start-stop-cli stop  <cpid> <connectorId>
+./start-stop-cli start <cpid> <connectorId> [idTag] [transactionId]
+./start-stop-cli start <vid>
+./start-stop-cli stop  <cpid> <connectorId> [idTag] [transactionId]
+./start-stop-cli stop  <vid>
 ```
 
 ---
