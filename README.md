@@ -177,4 +177,21 @@ netsh advfirewall firewall add rule name="Allow OCPP 9000" dir=in action=allow p
 
 ## หมายเหตุ
 
-- เปลี่ยนค่า `API_KEY` ใน `central.py` และ `apiKey` ใน `start_stop.go` ก่อนใช้งานจริง␍
+- เปลี่ยนค่า `API_KEY` ใน `central.py` และ `apiKey` ใน `start_stop.go` ก่อนใช้งานจริง
+
+# รายการงาน (Checklist)
+
+## สิ่งที่ทำไปแล้ว
+- เตรียมสภาพแวดล้อม Python (environment.yml, requirements.txt)
+- พัฒนาเซิร์ฟเวอร์ central.py พร้อม HTTP API และ WebSocket
+- เพิ่มสคริปต์ start_stop.go, list_active.go/py สำหรับควบคุมและติดตามธุรกรรม
+- สร้าง cp_simulator.py สำหรับทดสอบการเชื่อมต่อและการเริ่ม/หยุดชาร์จ
+- เตรียมสคริปต์ windows_fw_diagnose.py เพื่อจัดการไฟร์วอลล์บน Windows
+- บันทึกการใช้งานและตัวอย่างไว้ใน README.md
+
+## สิ่งที่ต้องทำเพิ่ม
+- รองรับ DataTransfer ใน central.py เพื่อจัดการข้อความเพิ่มเติมจากหัวชาร์จ
+- เพิ่มชุดทดสอบอัตโนมัติ (unit tests) และการตั้งค่า CI
+- ปรับปรุงเอกสารให้ครอบคลุมการใช้งาน cp_simulator.py และ HTTP API
+- เสริมมาตรการความปลอดภัย เช่น ปรับเปลี่ยน API_KEY และการยืนยันตัวตนอื่น ๆ
+
