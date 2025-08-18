@@ -75,6 +75,11 @@ go run start_stop.go start CP_001 1 TAG_1234 3 1.2 mode=fast,tag=special
 
 # หยุดชาร์จโดยใช้ transactionId และ vid
 go run start_stop.go stop  CP_001 1 TAG_1234 3 1.2
+
+# แบบสั้นสุด สนใจแค่ว่ารถคันไหน [ไม่แน่ใจว่าได้ไหม]
+go run start_stop.go start <vid>
+go run start_stop.go stop  <vid>
+
 ```
 หากได้รับ `context deadline exceeded` แสดงว่าไม่สามารถเชื่อมต่อถึงเซิร์ฟเวอร์ (อาจเพราะเซิร์ฟเวอร์ไม่ทำงานหรือถูกไฟร์วอลล์บล็อก).
 
@@ -171,4 +176,5 @@ netsh advfirewall firewall add rule name="Allow OCPP 9000" dir=in action=allow p
 ```
 
 ## หมายเหตุ
+
 - เปลี่ยนค่า `API_KEY` ใน `central.py` และ `apiKey` ใน `start_stop.go` ก่อนใช้งานจริง␍
