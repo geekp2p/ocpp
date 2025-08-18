@@ -218,6 +218,12 @@ async def log_requests(request: Request, call_next):
         logging.exception("Handler crashed")
         raise
 
+
+@app.get("/api/v1/health")
+def health():
+    """Basic health check endpoint."""
+    return {"ok": True, "time": datetime.utcnow().isoformat() + "Z"}
+
 class StartReq(BaseModel):
     cpid: str
     connectorId: int
