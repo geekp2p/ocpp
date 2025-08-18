@@ -76,6 +76,7 @@ func main() {
 		fmt.Println("usage:")
 		fmt.Println("  go run start_stop.go start <cpid> <connectorId> [idTag]")
 		fmt.Println("  go run start_stop.go stop  <cpid> <connectorId> [transactionId]")
+		fmt.Println("      If transactionId is provided, /api/v1/stop is used; otherwise /charge/stop")
 		return
 	}
 
@@ -103,6 +104,7 @@ func main() {
 	case "stop":
 		if len(os.Args) < 4 {
 			fmt.Println("usage: go run start_stop.go stop <cpid> <connectorId> [transactionId]")
+			fmt.Println("       omit transactionId to call /charge/stop")
 			return
 		}
 		connectorId, err := strconv.Atoi(os.Args[3])
@@ -127,5 +129,6 @@ func main() {
 		fmt.Println("usage:")
 		fmt.Println("  go run start_stop.go start <cpid> <connectorId> [idTag]")
 		fmt.Println("  go run start_stop.go stop  <cpid> <connectorId> [transactionId]")
+		fmt.Println("      If transactionId is provided, /api/v1/stop is used; otherwise /charge/stop")
 	}
 }
