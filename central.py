@@ -233,6 +233,10 @@ class StopReq(BaseModel):
     cpid: str
     transactionId: int
 
+class StopByConnectorReq(BaseModel):
+    cpid: str
+    connectorId: int
+
 def require_key(x_api_key: str | None):
     if API_KEY and x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="invalid api key")
@@ -252,13 +256,28 @@ async def api_start(req: StartReq, x_api_key: str | None = Header(default=None, 
 
 @app.post("/api/v1/stop")
 async def api_stop(req: StopReq, x_api_key: str | None = Header(default=None, alias="X-API-Key")):
-    require_key(x_api_key)
     cp = connected_cps.get(req.cpid)
     if not cp:
         raise HTTPException(status_code=404, detail=f"ChargePoint '{req.cpid}' not connected")
     try:
         await cp.remote_stop(req.transactionId)
         return {"ok": True, "message": "RemoteStopTransaction sent"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/charge/stop")
+async def api_stop_by_connector(req: StopByConnectorReq, x_api_key: str | None = Header(default=None, alias="X-API-Key")):
+    require_key(x_api_key)
+    cp = connected_cps.get(req.cpid)
+    if not cp:
+        raise HTTPException(status_code=404, detail=f"ChargePoint '{req.cpid}' not connected")
+    tx_id = cp.active_tx.get(req.connectorId)
+    if tx_id is None:
+        raise HTTPException(status_code=404, detail="No active transaction for this connector")
+    try:
+        await cp.remote_stop(tx_id)
+        return {"ok": True, "transactionId": tx_id, "message": "RemoteStopTransaction sent"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

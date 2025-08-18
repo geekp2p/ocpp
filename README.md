@@ -5,7 +5,7 @@
 ## โครงสร้างหลัก
 
 - `central.py` – เซิร์ฟเวอร์ WebSocket/HTTP API ที่รวมฟังก์ชัน Remote Start/Stop และคอนโซลคำสั่งเบื้องต้น
-- `start_stop.go` – โค้ด Go ที่เรียก HTTP API `/api/v1/start` และ `/api/v1/stop`
+- `start_stop.go` – โค้ด Go ที่เรียก HTTP API `/api/v1/start` และ `/charge/stop`
 - `cp_simulator.py` – ตัวจำลองหัวชาร์จอย่างง่ายสำหรับเชื่อมต่อทดสอบ
 - `windows_fw_diagnose.py` – สคริปต์ PowerShell/Python สำหรับตรวจ/แก้ไข Windows Firewall
 
@@ -36,8 +36,8 @@ python central.py
 - HTTP API ที่ `http://<host>:8080`
 
 ตัวอย่างส่วนของ API:
-- `POST /api/v1/start` ส่งคำสั่ง RemoteStartTransaction ให้หัวชาร์จที่เชื่อมต่ออยู่
-- `POST /api/v1/stop` ส่งคำสั่ง RemoteStopTransaction
+- `POST /api/v1/start` ส่งคำสั่ง RemoteStartTransaction ให้หัวชาร์จที่เชื่อมต่ออยู่␊
+- `POST /charge/stop` หยุดชาร์จโดยระบุ `cpid` และ `connectorId` (ไม่ต้องทราบ transactionId)
 ทั้งสองเอ็นด์พอยต์ต้องใส่ header `X-API-Key` (ค่าเริ่มต้นคือ `changeme-123`).
 
 บนคอนโซลที่รัน `central.py` สามารถสั่งได้ เช่น
@@ -49,7 +49,7 @@ ls                      # แสดง CP ที่เชื่อมต่อ
 
 ## การใช้งาน `start_stop.go`␊
 
-ไฟล์ Go นี้ใช้เรียก HTTP API จากระยะไกล โดยค่าเริ่มต้นจะชี้ไปยัง `http://45.136.236.186:8080/api/v1`.  ปรับ `apiBase` หรือ `apiKey` ในไฟล์ได้ตามต้องการ
+ไฟล์ Go นี้ใช้เรียก HTTP API จากระยะไกล โดยค่าเริ่มต้นจะชี้ไปยัง `http://45.136.236.186:8080`.  ปรับ `apiBase` หรือ `apiKey` ในไฟล์ได้ตามต้องการ
 ```bash
 go run start_stop.go
 ```
@@ -62,7 +62,7 @@ Start/Stop จาก API
 ```bash
 python cp_simulator.py
 ```
-เมื่อเห็น log ว่าเชื่อมต่อสำเร็จแล้ว จึงค่อยเรียก `start_stop.go` หรือ HTTP API `/api/v1/start` และ `/api/v1/stop`
+เมื่อเห็น log ว่าเชื่อมต่อสำเร็จแล้ว จึงค่อยเรียก `start_stop.go` หรือ HTTP API `/api/v1/start` และ `/charge/stop`
 
 ## ตรวจสอบไฟร์วอลล์บน Windows
 

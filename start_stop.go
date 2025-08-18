@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 )
 
@@ -64,10 +66,48 @@ func stopCharge(cpid string, transactionId int) error {
 }
 
 func main() {
-	if err := startCharge("CP_001", 1, "TAG_1234"); err != nil {
-		fmt.Println("Error starting charge:", err)
+	if len(os.Args) < 3 {
+		fmt.Println("usage:")
+		fmt.Println("  go run start_stop.go start <cpid> <connectorId> <idTag>")
+		fmt.Println("  go run start_stop.go stop <cpid> <transactionId>")
+		return
 	}
-	if err := stopCharge("CP_001", 3); err != nil {
-		fmt.Println("Error stopping charge:", err)
+
+	cmd := os.Args[1]
+	cpid := os.Args[2]
+
+	switch cmd {
+	case "start":
+		if len(os.Args) < 5 {
+			fmt.Println("usage: go run start_stop.go start <cpid> <connectorId> <idTag>")
+			return
+		}
+		connectorId, err := strconv.Atoi(os.Args[3])
+		if err != nil {
+			fmt.Println("Invalid connectorId:", err)
+			return
+		}
+		idTag := os.Args[4]
+		if err := startCharge(cpid, connectorId, idTag); err != nil {
+			fmt.Println("Error starting charge:", err)
+		}
+	case "stop":
+		if len(os.Args) < 4 {
+			fmt.Println("usage: go run start_stop.go stop <cpid> <transactionId>")
+			return
+		}
+		transactionId, err := strconv.Atoi(os.Args[3])
+		if err != nil {
+			fmt.Println("Invalid transactionId:", err)
+			return
+		}
+		if err := stopCharge(cpid, transactionId); err != nil {
+			fmt.Println("Error stopping charge:", err)
+		}
+	default:
+		fmt.Println("unknown cmd:", cmd)
+		fmt.Println("usage:")
+		fmt.Println("  go run start_stop.go start <cpid> <connectorId> <idTag>")
+		fmt.Println("  go run start_stop.go stop <cpid> <transactionId>")
 	}
 }
