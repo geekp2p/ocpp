@@ -88,6 +88,54 @@ canonical string ที่นำไปคำนวณ hash คือ
 
 ค่าที่ไม่ส่งให้แทนด้วย `-` และ `kv` จะถูกเรียงตามชื่อ key (ละเว้น key `hash`) ก่อนนำมาประกอบ canonical string แล้วจึงคำนวณค่า `hash` ด้วย SHA-256.
 
+#### ตัวอย่างรูปแบบก่อนมี `vid`/`kv` (ฟิลด์ 1–5)
+
+**Payload**
+```json
+{
+  "cpid": "CP_001",
+  "connectorId": 1,
+  "idTag": "TAG_1234",
+  "transactionId": 3,
+  "timestamp": "unix:1700000000",
+  "hash": "cb0d4e8db44d6dbd585867fc7fd2fe85f75eaba7e659972504baecb1f3a5a9f6"
+}
+```
+
+**Canonical string**
+```
+CP_001|1|TAG_1234|3|unix:1700000000
+```
+SHA-256
+```
+cb0d4e8db44d6dbd585867fc7fd2fe85f75eaba7e659972504baecb1f3a5a9f6
+```
+
+#### ตัวอย่างรูปแบบปัจจุบัน (ฟิลด์ 1–7 + hash)
+
+**Payload**
+```json
+{
+  "cpid": "CP_001",
+  "connectorId": 1,
+  "idTag": "TAG_1234",
+  "transactionId": 3,
+  "timestamp": "unix:1700000000",
+  "vid": "1.2",
+  "kv": "mode=fast,tag=special",
+  "hash": "cfcd214c6749f37c238783cae0565e29d9919b72b002b39fa1f360a0bc2f1b9f"
+}
+```
+
+**Canonical string**
+```
+CP_001|1|TAG_1234|3|unix:1700000000|1.2|mode=fast,tag=special
+```
+SHA-256
+```
+cfcd214c6749f37c238783cae0565e29d9919b72b002b39fa1f360a0bc2f1b9f
+```
+
 ## การใช้งาน `cp_simulator.py`
 
 สคริปต์นี้จำลองหัวชาร์จ ID `CP_001` และเชื่อมต่อไปยังเซิร์ฟเวอร์ที่ `ws://45.136.236.186:9000/ocpp/CP_001` เพื่อใช้ทดสอบคำสั่ง Start/Stop จาก API
