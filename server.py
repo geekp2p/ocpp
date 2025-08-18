@@ -54,6 +54,15 @@ LOW_POWER_TRACK = {}
 # ------------------ FastAPI Dashboard ------------------
 app = FastAPI()
 
+
+@app.get("/api/v1/health")
+def health():
+    """Simple health check endpoint."""
+    from datetime import datetime
+
+    return {"ok": True, "time": datetime.utcnow().isoformat() + "Z"}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def get_dashboard():
     """
