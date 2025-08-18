@@ -53,19 +53,15 @@ ls                      # แสดง CP ที่เชื่อมต่อ
 
 ## การใช้งาน `start_stop.go`
 
-ไฟล์ Go นี้ใช้เรียก HTTP API `/api/v1/start`, `/charge/stop` หรือ `/api/v1/stop` จากระยะไกล โดยค่าเริ่มต้นจะชี้ไปยัง `http://45.136.236.186:8080` สามารถปรับ `apiBase` หรือ `apiKey` ในไฟล์ได้ตามต้องการ
+ไฟล์ Go นี้ใช้เรียก HTTP API `/api/v1/start`, `/charge/stop` หรือ `/api/v1/stop` จากระยะไกล โดยค่าเริ่มต้นจะชี้ไปยัง `http://45.136.236.186:8080` สามารถปรับ `apiBase` หรือ `apiKey` ในไฟล์ได้ตามต้องการ นอกจากนี้สคริปต์จะเพิ่ม timestamp ปัจจุบันและค่า hash แบบ SHA-256 ลงในคำขอโดยอัตโนมัติ เพื่อให้เซิร์ฟเวอร์ตรวจสอบความถูกต้องได้
 
 ตัวอย่างคำสั่ง:
 ```bash
 # เริ่มชาร์จด้วย cpid/connectorId (idTag และ transactionId เป็นออปชัน)
 go run start_stop.go start <cpid> <connectorId> [idTag] [transactionId]
-# หรือเริ่มชาร์จจาก vid โดยไม่ต้องระบุ connector
-go run start_stop.go start <vid>
 
 # หยุดชาร์จโดยระบุ cpid และ connectorId (หรือเพิ่ม idTag/transactionId)
 go run start_stop.go stop <cpid> <connectorId> [idTag] [transactionId]
-# หยุดชาร์จจาก vid หากมีธุรกรรมอยู่
-go run start_stop.go stop <vid>
 ```
 หากได้รับ `context deadline exceeded` แสดงว่าไม่สามารถเชื่อมต่อถึงเซิร์ฟเวอร์ (อาจเพราะเซิร์ฟเวอร์ไม่ทำงานหรือถูกไฟร์วอลล์บล็อก).
 

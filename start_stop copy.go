@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"fmt"
 	"io"
 	"net"
@@ -54,21 +53,9 @@ func doJSON(method, url, body string) error {
 	return nil
 }
 
-func computeHash(cpid string, connectorId int, idTag, txId, ts string) string {
-	canonical := fmt.Sprintf("%s|%d|%s|%s|%s|-|-", cpid, connectorId, idTag, txId, ts)
-	sum := sha256.Sum256([]byte(canonical))
-	return fmt.Sprintf("%x", sum)
-}
-
 func startCharge(cpid string, connectorId int, idTag string, txId *int) error {
 	url := fmt.Sprintf("%s/api/v1/start", apiBase)
-	ts := time.Now().UTC().Format(time.RFC3339)
-	txStr := "-"
-	if txId != nil {
-		txStr = strconv.Itoa(*txId)
-	}
-	hash := computeHash(cpid, connectorId, idTag, txStr, ts)
-	jsonBody := fmt.Sprintf(`{"cpid":"%s","connectorId":%d,"idTag":"%s","timestamp":"%s","hash":"%s"`, cpid, connectorId, idTag, ts, hash)
+	jsonBody := fmt.Sprintf(`{"cpid":"%s","connectorId":%d,"idTag":"%s"`, cpid, connectorId, idTag)
 	if txId != nil {
 		jsonBody += fmt.Sprintf(`,"transactionId":%d`, *txId)
 	}
@@ -83,17 +70,7 @@ func stopCharge(cpid string, connectorId int, idTag *string, txId *int) error {
 		return doJSON("POST", url, jsonBody)
 	}
 	url := fmt.Sprintf("%s/api/v1/stop", apiBase)
-	ts := time.Now().UTC().Format(time.RFC3339)
-	id := "-"
-	if idTag != nil {
-		id = *idTag
-	}
-	txStr := "-"
-	if txId != nil {
-		txStr = strconv.Itoa(*txId)
-	}
-	hash := computeHash(cpid, connectorId, id, txStr, ts)
-	jsonBody := fmt.Sprintf(`{"cpid":"%s","connectorId":%d,"timestamp":"%s","hash":"%s"`, cpid, connectorId, ts, hash)
+	jsonBody := fmt.Sprintf(`{"cpid":"%s","connectorId":%d`, cpid, connectorId)
 	if idTag != nil {
 		jsonBody += fmt.Sprintf(`,"idTag":"%s"`, *idTag)
 	}
@@ -104,11 +81,25 @@ func stopCharge(cpid string, connectorId int, idTag *string, txId *int) error {
 	return doJSON("POST", url, jsonBody)
 }
 
+func startByVID(vid string) error {
+	url := fmt.Sprintf("%s/api/v1/start_vid", apiBase)
+	jsonBody := fmt.Sprintf(`{"vid":"%s"}`, vid)
+	return doJSON("POST", url, jsonBody)
+}
+
+func stopByVID(vid string) error {
+	url := fmt.Sprintf("%s/api/v1/stop_vid", apiBase)
+	jsonBody := fmt.Sprintf(`{"vid":"%s"}`, vid)
+	return doJSON("POST", url, jsonBody)
+}
+
 func main() {
 	if len(os.Args) < 3 {
 		fmt.Println("usage:")
 		fmt.Println("  go run start_stop.go start <cpid> <connectorId> [idTag] [transactionId]")
 		fmt.Println("  go run start_stop.go stop  <cpid> <connectorId> [idTag] [transactionId]")
+		fmt.Println("  go run start_stop.go start <vid>")
+		fmt.Println("  go run start_stop.go stop  <vid>")
 		fmt.Println("      If idTag/transactionId are omitted, defaults are used and /charge/stop may be called")
 		return
 	}
@@ -117,6 +108,13 @@ func main() {
 
 	switch cmd {
 	case "start":
+		if len(os.Args) == 3 {
+			vid := os.Args[2]
+			if err := startByVID(vid); err != nil {
+				fmt.Println("Error starting by vid:", err)
+			}
+			return
+		}
 		if len(os.Args) < 4 {
 			fmt.Println("usage: go run start_stop.go start <cpid> <connectorId> [idTag] [transactionId]")
 			return
@@ -144,6 +142,13 @@ func main() {
 			fmt.Println("Error starting charge:", err)
 		}
 	case "stop":
+		if len(os.Args) == 3 {
+			vid := os.Args[2]
+			if err := stopByVID(vid); err != nil {
+				fmt.Println("Error stopping by vid:", err)
+			}
+			return
+		}
 		if len(os.Args) < 4 {
 			fmt.Println("usage: go run start_stop.go stop <cpid> <connectorId> [idTag] [transactionId]")
 			fmt.Println("       omit idTag/transactionId to call /charge/stop")
@@ -177,5 +182,7 @@ func main() {
 		fmt.Println("usage:")
 		fmt.Println("  go run start_stop.go start <cpid> <connectorId> [idTag] [transactionId]")
 		fmt.Println("  go run start_stop.go stop  <cpid> <connectorId> [idTag] [transactionId]")
+		fmt.Println("  go run start_stop.go start <vid>")
+		fmt.Println("  go run start_stop.go stop  <vid>")
 	}
 }
