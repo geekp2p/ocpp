@@ -1,0 +1,7 @@
+power shell
+
+Invoke-WebRequest -Uri https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe -OutFile .\Miniconda3-latest-Windows-x86_64.exe
+
+conda env create -f environment.yml
+
+netsh advfirewall firewall add rule name="Allow OCPP 9000" dir=in action=allow protocol=TCP localport=9000

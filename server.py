@@ -883,13 +883,23 @@ async def local_start_transaction_api(data: dict):
     """
     API endpoint to simulate a local start from the Charge Point.
     """
+    cp_id = data.get("charge_point_id")
+    connector_id = data.get("connector_id")
+    id_tag = data.get("id_tag")
 
-        try:
-        response = await charge_point.remote_stop_transaction(transaction_id)
+    if not cp_id or connector_id is None or not id_tag:
+        raise HTTPException(status_code=400, detail="ต้องมี charge_point_id, connector_id และ id_tag")
+
+    if cp_id not in connected_charge_points:
+        raise HTTPException(status_code=404, detail="ไม่พบ Charge Point")
+
+    charge_point = connected_charge_points[cp_id]
+
+    try:
+        response = await charge_point.local_start_process(id_tag, int(connector_id))
         return {"status": "success", "response": response}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/api/charge/start")
 async def charge_start(data: dict):
@@ -943,10 +953,8 @@ async def get_diagnostics_api(data: dict):
     """
     API endpoint to send a GetDiagnostics.req to the specified Charge Point.
     """
-
     cp_id = data.get('charge_point_id')
-    connector_id = data.get('connector_id')
-    id_tag = data.get('id_tag')
+    location = data.get('location')
 
     if cp_id not in connected_charge_points:
         raise HTTPException(status_code=404, detail="Charge Point ไม่พบ")
@@ -954,7 +962,7 @@ async def get_diagnostics_api(data: dict):
     charge_point = connected_charge_points[cp_id]
 
     try:
-        response = await charge_point.local_start_process(id_tag, connector_id)
+        response = await charge_point.get_diagnostics(location=location)
         return {"status": "success", "response": response}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1405,8 +1413,8 @@ class ChargePoint(BaseChargePoint):
 
 
 # ------------------ OCPP WebSocket Server ------------------
-async def on_connect(websocket, path):
-    cp_id = path.strip("/")
+async def on_connect(websocket):
+    cp_id = websocket.path.strip("/")
     if not cp_id:
         logging.error("ข้อผิดพลาด: พยายามเชื่อมต่อด้วย Charge Point ID ว่างเปล่า. ปิดการเชื่อมต่อ.")
         await websocket.close()
@@ -1421,7 +1429,7 @@ async def on_connect(websocket, path):
         await charge_point.notify_dashboard(f"[Reconnected] Charge Point ID: {cp_id} กลับมาเชื่อมต่อแล้ว.")
         # Re-set connectors to 'Available' or last known state (we'll just use Available for simplicity)
         for conn_id in charge_point.connectors:
-             charge_point.connectors[conn_id]['status'] = "Available"
+            charge_point.connectors[conn_id]['status'] = "Available"
     else:
         # It's a new connection.
         try:
@@ -1431,8 +1439,8 @@ async def on_connect(websocket, path):
             logging.info(f"[Connected] Charge Point ID: {cp_id}")
             await charge_point.notify_dashboard(f"[Connected] Charge Point ID: {cp_id} เชื่อมต่อแล้ว.")
         except Exception as e:
-            logging.exception(f"[Error] การเชื่อมต่อสำหรับ path '{path}' ล้มเหลว: {e}")
-            return # Exit function on error
+            logging.exception(f"[Error] การเชื่อมต่อสำหรับ path '{websocket.path}' ล้มเหลว: {e}")
+            return  # Exit function on error
 
     try:
         await charge_point.start()
