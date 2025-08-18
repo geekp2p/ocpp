@@ -2,7 +2,7 @@
 
 ## 1) ภาพรวม
 สแต็กนี้มี 3 ส่วนหลัก  
-- **Central Server (`central.py`)**: เปิด WebSocket ให้ตู้ชาร์จเชื่อมต่อ OCPP 1.6J และเปิด **HTTP API** ให้ฝั่งแอป/สคริปต์สั่ง Start/Stop และดูสถานะ  
+ - **Central Server (`central.py`)**: เปิด WebSocket ให้ตู้ชาร์จเชื่อมต่อ OCPP 1.6J และเปิด **HTTP API** ให้ฝั่งแอป/สคริปต์สั่ง Start/Stop และดูสถานะ
 - **Go CLI**: ชุดคำสั่ง `start_stop.go`, `list_active.go` สำหรับสั่งงานผ่าน HTTP API  
 - **ตัวจำลองหัวชาร์จ (`cp_simulator.py`)**: ใช้ทดสอบแบบไม่ต้องมีฮาร์ดแวร์จริง
 
