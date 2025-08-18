@@ -1,15 +1,30 @@
+# cp_simulator.py
 import asyncio
 import logging
+import json
 from datetime import datetime
 
 import websockets
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as CPBase
 from ocpp.v16 import call, call_result
-from ocpp.v16.enums import Action, AuthorizationStatus, RegistrationStatus, RemoteStartStopStatus
+from ocpp.v16.enums import (
+    Action,
+    AuthorizationStatus,
+    RegistrationStatus,
+    RemoteStartStopStatus,
+    DataTransferStatus,   # ⬅️ ใช้กับ DataTransfer.conf
+)
 
 logging.basicConfig(level=logging.INFO)
 
+# ค่าคอนฟิกตัวอย่างฝั่ง CP (เอาไว้ตอบ GetConfiguration)
+SUPPORTED_CONFIG = {
+    # key: value (ตามสเปก value เป็น string)
+    "HeartbeatInterval": "300",
+    # ถ้าอยากให้ CSMS เห็นว่ารองรับ QRcodeConnectorID1 ให้ปลดคอมเมนต์บรรทัดล่าง
+    # "QRcodeConnectorID1": "1",
+}
 
 class ChargePoint(CPBase):
     """Minimal OCPP 1.6 charge point simulator."""
@@ -52,6 +67,57 @@ class ChargePoint(CPBase):
             interval=300,
             status=RegistrationStatus.accepted,
         )
+
+    # ⬇️⬇️⬇️ เพิ่มสองแฮนด์เลอร์ที่ขาด เพื่อไม่ให้ NotImplementedError ⬇️⬇️⬇️
+    @on(Action.get_configuration)
+    async def on_get_configuration(self, key=None, **kwargs):
+        """ตอบ GetConfiguration จาก CSMS
+        - ถ้า CSMS ส่ง key=[] หรือไม่ส่งเลย: คืนค่าทั้งหมดที่รองรับ
+        - ถ้าส่งมาเฉพาะบาง key: คืนที่มี และใส่ที่ไม่รู้จักลง unknown_key
+        """
+        requested = key or []  # list[str] หรือว่างแปลว่าขอทั้งหมด
+        config_items = []
+        unknown = []
+
+        if not requested:
+            # คืนทั้งหมดที่รองรับ
+            for k, v in SUPPORTED_CONFIG.items():
+                config_items.append({"key": k, "readonly": False, "value": v})
+        else:
+            for k in requested:
+                if k in SUPPORTED_CONFIG:
+                    config_items.append({"key": k, "readonly": False, "value": SUPPORTED_CONFIG[k]})
+                else:
+                    unknown.append(k)
+
+        logging.info("→ GetConfiguration: return %d keys, unknown=%s", len(config_items), unknown)
+        return call_result.GetConfiguration(
+            configuration_key=config_items,
+            unknown_key=unknown,
+        )
+
+    @on(Action.data_transfer)
+    async def on_data_transfer(self, vendor_id, message_id=None, data=None, **kwargs):
+        """รับ DataTransfer จาก CSMS (เช่นสั่งแสดง QR)
+        แค่ตอบรับ (accepted) เพื่อไม่ให้ CSMS โยน NotImplementedError
+        """
+        logging.info("→ DataTransfer: vendor_id=%s message_id=%s data=%s", vendor_id, message_id, data)
+
+        # ตัวอย่าง: ถ้าเป็นคำสั่งแสดง QR ก็ลอง parse JSON ดู (ไม่ทำอะไรมาก แค่ log)
+        try:
+            payload = json.loads(data) if isinstance(data, str) and data else {}
+            msg_type = payload.get("message_type")
+            uri = payload.get("uri")
+            if vendor_id == "com.yourcompany.payment" and message_id == "DisplayQRCode" and msg_type == "QRCode":
+                logging.info("   Display QRCode requested: %s", uri)
+        except Exception as exc:
+            logging.warning("   DataTransfer payload parse error: %s", exc)
+
+        return call_result.DataTransfer(
+            status=DataTransferStatus.accepted,
+            data="ok"
+        )
+    # ⬆️⬆️⬆️ จบส่วนที่เพิ่ม ⬆️⬆️⬆️
 
 
 async def main():
