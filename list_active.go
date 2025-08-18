@@ -67,6 +67,7 @@ func main() {
 		return
 	}
 	for _, s := range out.Sessions {
-		fmt.Printf("%s %d %s %d\n", s.CPID, s.ConnectorID, s.IDTag, s.TransactionID)
+		transactionID := s.TransactionID
+		fmt.Printf("%s %d %s %d\n", s.CPID, s.ConnectorID, s.IDTag, transactionID)
 	}
 }
