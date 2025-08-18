@@ -14,7 +14,7 @@ from ocpp.v16 import ChargePoint, call, call_result
 from ocpp.v16.enums import RegistrationStatus, AuthorizationStatus, Action, RemoteStartStopStatus
 
 # --- เพิ่ม import สำหรับ HTTP API ---
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Request
 from pydantic import BaseModel
 import uvicorn
 
@@ -207,6 +207,17 @@ API_KEY = "changeme-123"  # เปลี่ยนเป็นค่า secret �
 
 app = FastAPI(title="OCPP Central Control API", version="1.0.0")
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logging.info(f">>> {request.method} {request.url.path}")
+    try:
+        response = await call_next(request)
+        logging.info(f"<<< {request.method} {request.url.path} -> {response.status_code}")
+        return response
+    except Exception:
+        logging.exception("Handler crashed")
+        raise
+
 class StartReq(BaseModel):
     cpid: str
     connectorId: int
@@ -297,7 +308,7 @@ async def main():
                 return
             if not cmd:
                 continue
-            parts = cmd.split()
+            parts = cmd split()
             if parts[0] == "ls":
                 print("Connected CPs:", ", ".join(connected_cps.keys()) or "(none)")
                 continue
