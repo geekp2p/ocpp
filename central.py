@@ -70,6 +70,8 @@ class CentralSystem(ChargePoint):
         self.active_tx: Dict[int, Dict[str, Any]] = {}
         # เก็บรายการ remote start ที่สั่งไว้ เพื่อใช้ตรวจสอบตอนรับ StartTransaction
         self.pending_remote: Dict[int, str] = {}
+        # เก็บข้อมูลเพิ่มเติมระหว่างรอ StartTransaction (เช่น vid)
+        self.pending_start: Dict[int, Dict[str, Any]] = {}
 
     # เมธอดสั่งเริ่มชาร์จ
     async def remote_start(self, connector_id: int, id_tag: str):
@@ -92,6 +94,7 @@ class CentralSystem(ChargePoint):
             )
         else:
             logging.warning(f"RemoteStartTransaction rejected: {status}")
+        return status
 
     # เมธอดสั่งหยุดชาร์จ
     async def remote_stop(self, transaction_id: int):
@@ -381,7 +384,13 @@ async def api_start(req: StartReq, x_api_key: str | None = Header(default=None, 
             )
 
         id_tag = req.idTag or DEFAULT_ID_TAG
-        await cp.remote_start(req.connectorId, id_tag)
+        # เตรียมข้อมูล pending สำหรับ StartTransaction ที่จะตามมา
+        cp.pending_start[int(req.connectorId)] = {"id_tag": id_tag}
+        if req.vid:
+            cp.pending_start[int(req.connectorId)]["vid"] = req.vid
+        status = await cp.remote_start(req.connectorId, id_tag)
+        if status != RemoteStartStopStatus.accepted:
+            cp.pending_start.pop(int(req.connectorId), None)
         # ถ้า charger รับ จะตามด้วย StartTransaction.req → เราจะ assign transactionId ให้เอง
         return {"ok": True, "hash": expected_hash, "message": "RemoteStartTransaction sent"}
     except Exception as e:
