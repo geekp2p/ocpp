@@ -261,7 +261,7 @@ class CentralSystem(ChargePoint):
             )
 
         # remote start was expected, remove pending flag
-        self.pending_remote.pop(int(connector_id), None))
+        self.pending_remote.pop(int(connector_id), None)
 
         tx_id = next(_tx_counter)  # CSMS ออกเลข transactionId
         # เก็บทั้ง transactionId และ idTag เพื่อให้ API ภายนอกเรียกดูได้
