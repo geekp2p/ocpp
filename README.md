@@ -219,4 +219,63 @@ netsh advfirewall firewall add rule name="Allow OCPP 9000" dir=in action=allow p
 - ปรับปรุงเอกสารให้ครอบคลุมการใช้งาน cp_simulator.py และ HTTP API
 - เสริมมาตรการความปลอดภัย เช่น ปรับเปลี่ยน API_KEY และการยืนยันตัวตนอื่น ๆ
 
+## ตัวอย่าง
+
+# Examples for Sending Start/Stop Commands
+
+This document shows how to call the HTTP APIs or the `start_stop.go` helper in
+several ways. Adjust `<host>` to your server address and update `apiKey` in the
+source code if necessary.
+
+## 1. Start/Stop with CPID and connector only
+
+These commands use the default `idTag` and do not supply a transaction ID. The
+stop request automatically falls back to `/charge/stop`.
+
+```bash
+# start
+go run start_stop.go start CP_001 1
+# stop
+go run start_stop.go stop  CP_001 1
+```
+
+## 2. Start/Stop with custom idTag and transactionId
+
+Specify additional fields to target a specific transaction.
+
+```bash
+# start with custom idTag and transactionId
+go run start_stop.go start CP_001 1 TAG_1234 10
+# stop using the same values
+go run start_stop.go stop  CP_001 1 TAG_1234 10
+```
+
+## 3. HTTP start/stop using only a vehicle identifier (VID)
+
+Use cURL to call the dedicated endpoints when you only know the VID.
+
+```bash
+curl -X POST http://<host>:8080/api/v1/start_vid \
+  -H "X-API-Key: changeme-123" \
+  -H "Content-Type: application/json" \
+  -d '{"vid":"1.2"}'
+
+curl -X POST http://<host>:8080/api/v1/stop_vid \
+  -H "X-API-Key: changeme-123" \
+  -H "Content-Type: application/json" \
+  -d '{"vid":"1.2"}'
+```
+
+## 4. Stop by CPID and connector with known transactionId
+
+When the transaction ID is known, the CLI will call `/api/v1/stop` instead of
+`/charge/stop`.
+
+```bash
+# stop by transactionId only
+go run start_stop.go stop CP_001 1 - 10
+```
+
+The placeholder `-` is used for `idTag` to indicate that only the
+transaction ID is supplied.
 
