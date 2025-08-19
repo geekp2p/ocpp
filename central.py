@@ -248,9 +248,9 @@ class CentralSystem(ChargePoint):
     @on(Action.StartTransaction)
     async def on_start_transaction(self, connector_id, id_tag, meter_start, timestamp, reservation_id=None, **kwargs):
         expected = self.pending_remote.get(int(connector_id))
-        if expected != id_tag:
+        if expected is not None and expected != id_tag:
             logging.warning(
-                f"StartTransaction for connector {connector_id} received without pending remote start; rejecting"
+                f"StartTransaction for connector {connector_id} received with unexpected idTag (expected={expected}, got={id_tag}); rejecting"
             )
             await self.unlock_connector(int(connector_id))
             self.pending_remote.pop(int(connector_id), None)
@@ -260,8 +260,9 @@ class CentralSystem(ChargePoint):
                 id_tag_info={"status": AuthorizationStatus.invalid},
             )
 
-        # remote start was expected, remove pending flag
+        # ถ้ามี remote start pending ให้ลบ flag ทิ้ง
         self.pending_remote.pop(int(connector_id), None)
+        pending = self.pending_start.pop(int(connector_id), None) or {}
 
         tx_id = next(_tx_counter)  # CSMS ออกเลข transactionId
         # เก็บทั้ง transactionId และ idTag เพื่อให้ API ภายนอกเรียกดูได้
