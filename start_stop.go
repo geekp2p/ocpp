@@ -33,10 +33,10 @@ var httpClient = &http.Client{
 	},
 }
 
-func doJSON(method, url, body string) error {
+func doJSON(method, url, body string) (int, []byte, error) {
 	req, err := http.NewRequest(method, url, bytes.NewBufferString(body))
 	if err != nil {
-		return err
+		return 0, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", apiKey)
@@ -44,14 +44,14 @@ func doJSON(method, url, body string) error {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 
 	b, _ := io.ReadAll(resp.Body)
 	fmt.Printf("%s %s -> %d %s\n", method, url, resp.StatusCode, http.StatusText(resp.StatusCode))
 	fmt.Println(string(b))
-	return nil
+	return resp.StatusCode, b, nil
 }
 
 func computeHash(cpid string, connectorId int, idTag, txId, ts string) string {
@@ -73,15 +73,11 @@ func startCharge(cpid string, connectorId int, idTag string, txId *int) error {
 		jsonBody += fmt.Sprintf(`,"transactionId":%d`, *txId)
 	}
 	jsonBody += "}"
-	return doJSON("POST", url, jsonBody)
+	_, _, err := doJSON("POST", url, jsonBody)
+	return err
 }
 
 func stopCharge(cpid string, connectorId int, idTag *string, txId *int) error {
-	if txId == nil && idTag == nil {
-		url := fmt.Sprintf("%s/charge/stop", apiBase)
-		jsonBody := fmt.Sprintf(`{"cpid":"%s","connectorId":%d}`, cpid, connectorId)
-		return doJSON("POST", url, jsonBody)
-	}
 	url := fmt.Sprintf("%s/api/v1/stop", apiBase)
 	ts := time.Now().UTC().Format(time.RFC3339)
 	id := "-"
@@ -101,7 +97,16 @@ func stopCharge(cpid string, connectorId int, idTag *string, txId *int) error {
 		jsonBody += fmt.Sprintf(`,"transactionId":%d`, *txId)
 	}
 	jsonBody += "}"
-	return doJSON("POST", url, jsonBody)
+	status, _, err := doJSON("POST", url, jsonBody)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusNotFound && txId == nil && idTag == nil {
+		relURL := fmt.Sprintf("%s/api/v1/release", apiBase)
+		relBody := fmt.Sprintf(`{"cpid":"%s","connectorId":%d}`, cpid, connectorId)
+		_, _, err = doJSON("POST", relURL, relBody)
+	}
+	return err
 }
 
 func main() {

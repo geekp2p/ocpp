@@ -3,15 +3,22 @@
 import asyncio
 import logging
 import json
+import hashlib
 from datetime import datetime
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Tuple
 import itertools
 import threading
 
 from websockets import serve
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint, call, call_result
-from ocpp.v16.enums import RegistrationStatus, AuthorizationStatus, Action, RemoteStartStopStatus
+from ocpp.v16.enums import (
+    RegistrationStatus,
+    AuthorizationStatus,
+    Action,
+    RemoteStartStopStatus,
+    DataTransferStatus,
+)
 
 # --- เพิ่ม import สำหรับ HTTP API ---
 from fastapi import FastAPI, HTTPException, Header, Request
@@ -61,6 +68,10 @@ class CentralSystem(ChargePoint):
     def __init__(self, id, connection):
         super().__init__(id, connection)
         self.active_tx: Dict[int, Dict[str, Any]] = {}
+        # เก็บรายการ remote start ที่สั่งไว้ เพื่อใช้ตรวจสอบตอนรับ StartTransaction
+        self.pending_remote: Dict[int, str] = {}
+        # เก็บข้อมูลเพิ่มเติมระหว่างรอ StartTransaction (เช่น vid)
+        self.pending_start: Dict[int, Dict[str, Any]] = {}
 
     # เมธอดสั่งเริ่มชาร์จ
     async def remote_start(self, connector_id: int, id_tag: str):
@@ -76,9 +87,14 @@ class CentralSystem(ChargePoint):
         logging.info(f"← RemoteStartTransaction.conf: {resp}")
         status = getattr(resp, "status", None)
         if status == RemoteStartStopStatus.accepted:
-            logging.info("RemoteStartTransaction accepted (chargerจะส่ง StartTransaction.req ตามมา)")
+            # จดจำว่า connector นี้มี remote start pending
+            self.pending_remote[int(connector_id)] = id_tag
+            logging.info(
+                "RemoteStartTransaction accepted (chargerจะส่ง StartTransaction.req ตามมา)"
+            )
         else:
             logging.warning(f"RemoteStartTransaction rejected: {status}")
+        return status
 
     # เมธอดสั่งหยุดชาร์จ
     async def remote_stop(self, transaction_id: int):
@@ -175,25 +191,58 @@ class CentralSystem(ChargePoint):
         logging.info(f"← MeterValues from connector {connector_id}: {meter_value}")
         return call_result.MeterValuesPayload()
 
+    @on(Action.DataTransfer)
+    async def on_data_transfer(self, vendor_id, message_id=None, data=None, **kwargs):
+        """Handle custom DataTransfer messages from the charger."""
+        logging.info(
+            f"← DataTransfer: vendorId={vendor_id}, messageId={message_id}, data={data}"
+        )
+        return call_result.DataTransferPayload(status=DataTransferStatus.accepted)
+
     # ดักรับ StartTransaction เพื่อ “ออกเลข” และจดจำ transaction
     @on(Action.StartTransaction)
     async def on_start_transaction(self, connector_id, id_tag, meter_start, timestamp, reservation_id=None, **kwargs):
+        expected = self.pending_remote.get(int(connector_id))
+        if expected != id_tag:
+            logging.warning(
+                f"StartTransaction for connector {connector_id} received without pending remote start; rejecting"
+            )
+            return call_result.StartTransactionPayload(
+                transaction_id=0,
+                id_tag_info={"status": AuthorizationStatus.invalid},
+            )
+
+        # remote start was expected, remove pending flag
+        self.pending_remote.pop(int(connector_id), None)
+
         tx_id = next(_tx_counter)  # CSMS ออกเลข transactionId
         # เก็บทั้ง transactionId และ idTag เพื่อให้ API ภายนอกเรียกดูได้
+        pending = self.pending_start.pop(int(connector_id), None)
+        if not pending:
+            logging.warning(
+                f"StartTransaction for connector {connector_id} received without pending remote start; rejecting"
+            )
+            return call_result.StartTransactionPayload(
+                transaction_id=0,
+                id_tag_info={"status": AuthorizationStatus.rejected}
+            )
+
         self.active_tx[int(connector_id)] = {
             "transaction_id": tx_id,
             "id_tag": id_tag,
+            "vid": pending.get("vid"),
         }
         logging.info(
-            f"← StartTransaction from {self.id}: connector={connector_id}, idTag={id_tag}, meterStart={meter_start}"
+            f"← StartTransaction from {self.id}: connector={connector_id}, idTag={id_tag}, meterStart={meter_start}, vid={pending.get('vid')}"
         )
         logging.info(f"→ Assign transactionId={tx_id}")
         return call_result.StartTransactionPayload(
             transaction_id=tx_id,
-            id_tag_info={"status": AuthorizationStatus.accepted}
+            id_tag_info={"status": AuthorizationStatus.accepted},
         )
 
-    # ดักรับ StopTransaction เพื่อเคลียร์สถานะ
+
+# ดักรับ StopTransaction เพื่อเคลียร์สถานะ
     @on(Action.StopTransaction)
     async def on_stop_transaction(self, transaction_id, meter_stop, timestamp, **kwargs):
         for c_id, info in list(self.active_tx.items()):
@@ -213,6 +262,44 @@ API_KEY = "changeme-123"  # เปลี่ยนเป็นค่า secret �
 DEFAULT_ID_TAG = "DEMO_IDTAG"
 
 app = FastAPI(title="OCPP Central Control API", version="1.0.0")
+
+def parse_kv(raw: str | None) -> Tuple[str, Dict[str, str]]:
+    """Parse kv string into canonical sorted string and dict."""
+    if not raw or raw.strip() == "-":
+        return "-", {}
+    kv_map: Dict[str, str] = {}
+    for part in raw.split(","):
+        if not part:
+            continue
+        key, _, value = part.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if not key or key == "hash":
+            continue
+        kv_map[key] = value
+    if not kv_map:
+        return "-", {}
+    sorted_items = sorted(kv_map.items())
+    sorted_str = ",".join(f"{k}={v}" for k, v in sorted_items)
+    return sorted_str, kv_map
+
+def compute_hash_canonical(
+    cpid: str,
+    connector_id: int,
+    id_tag: str | None,
+    tx_id: str | None,
+    ts: str | None,
+    vid: str | None,
+    sorted_kv: str,
+) -> str:
+    """Compute SHA-256 hash of canonical string."""
+    def norm(v: str | None) -> str:
+        return v if v else "-"
+
+    canonical = (
+        f"{cpid}|{connector_id}|{norm(id_tag)}|{norm(tx_id)}|{norm(ts)}|{norm(vid)}|{norm(sorted_kv)}"
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -235,11 +322,23 @@ class StartReq(BaseModel):
     cpid: str
     connectorId: int
     idTag: str | None = None
+    transactionId: int | None = None
+    timestamp: str | None = None
+    vid: str | None = None
+    kv: str | None = None
+    kvMap: Dict[str, str] | None = None
+    hash: str | None = None
 
 class StopReq(BaseModel):
     cpid: str
-    transactionId: int
+    transactionId: int | None = None
     connectorId: int | None = None
+    idTag: str | None = None
+    timestamp: str | None = None
+    vid: str | None = None
+    kv: str | None = None
+    kvMap: Dict[str, str] | None = None
+    hash: str | None = None
 
 class StopByConnectorReq(BaseModel):
     cpid: str
@@ -262,10 +361,38 @@ async def api_start(req: StartReq, x_api_key: str | None = Header(default=None, 
     if not cp:
         raise HTTPException(status_code=404, detail=f"ChargePoint '{req.cpid}' not connected")
     try:
+        # compute hash if provided
+        sorted_kv = "-"
+        kv_map = {}
+        if req.kvMap:
+            kv_map = {k: v for k, v in req.kvMap.items() if k != "hash"}
+            sorted_kv = ",".join(f"{k}={kv_map[k]}" for k in sorted(kv_map))
+        elif req.kv:
+            sorted_kv, kv_map = parse_kv(req.kv)
+        expected_hash = compute_hash_canonical(
+            req.cpid,
+            req.connectorId,
+            req.idTag,
+            str(req.transactionId) if req.transactionId is not None else None,
+            req.timestamp,
+            req.vid,
+            sorted_kv,
+        )
+        if req.hash and req.hash.lower() != expected_hash.lower():
+            logging.warning(
+                f"hash mismatch: provided={req.hash} computed={expected_hash}"
+            )
+
         id_tag = req.idTag or DEFAULT_ID_TAG
-        await cp.remote_start(req.connectorId, id_tag)
+        # เตรียมข้อมูล pending สำหรับ StartTransaction ที่จะตามมา
+        cp.pending_start[int(req.connectorId)] = {"id_tag": id_tag}
+        if req.vid:
+            cp.pending_start[int(req.connectorId)]["vid"] = req.vid
+        status = await cp.remote_start(req.connectorId, id_tag)
+        if status != RemoteStartStopStatus.accepted:
+            cp.pending_start.pop(int(req.connectorId), None)
         # ถ้า charger รับ จะตามด้วย StartTransaction.req → เราจะ assign transactionId ให้เอง
-        return {"ok": True, "message": "RemoteStartTransaction sent"}
+        return {"ok": True, "hash": expected_hash, "message": "RemoteStartTransaction sent"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -276,11 +403,49 @@ async def api_stop(req: StopReq, x_api_key: str | None = Header(default=None, al
     if not cp:
         raise HTTPException(status_code=404, detail=f"ChargePoint '{req.cpid}' not connected")
     try:
-        await cp.remote_stop(req.transactionId)
-        return {"ok": True, "message": "RemoteStopTransaction sent"}
+        sorted_kv = "-"
+        kv_map = {}
+        if req.kvMap:
+            kv_map = {k: v for k, v in req.kvMap.items() if k != "hash"}
+            sorted_kv = ",".join(f"{k}={kv_map[k]}" for k in sorted(kv_map))
+        elif req.kv:
+            sorted_kv, kv_map = parse_kv(req.kv)
+        expected_hash = "-"
+        if req.connectorId is not None:
+            expected_hash = compute_hash_canonical(
+                req.cpid,
+                req.connectorId,
+                req.idTag,
+                str(req.transactionId) if req.transactionId is not None else None,
+                req.timestamp,
+                req.vid,
+                sorted_kv,
+            )
+            if req.hash and req.hash.lower() != expected_hash.lower():
+                logging.warning(
+                    f"hash mismatch: provided={req.hash} computed={expected_hash}"
+                )
+
+        tx_id = req.transactionId
+        if tx_id is None:
+            session = None
+            if req.connectorId is not None:
+                session = cp.active_tx.get(req.connectorId)
+                if session and req.idTag and session.get("id_tag") != req.idTag:
+                    session = None
+            if session is None and req.idTag:
+                for info in cp.active_tx.values():
+                    if info.get("id_tag") == req.idTag:
+                        session = info
+                        break
+            if session:
+                tx_id = session.get("transaction_id")
+        if tx_id is None:
+            raise HTTPException(status_code=404, detail="No matching active transaction")
+        await cp.remote_stop(tx_id)
+        return {"ok": True, "transactionId": tx_id, "hash": expected_hash, "message": "RemoteStopTransaction sent"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/charge/stop")
 async def api_stop_by_connector(req: StopByConnectorReq, x_api_key: str | None = Header(default=None, alias="X-API-Key")):

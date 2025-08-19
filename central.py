@@ -262,11 +262,7 @@ class CentralSystem(ChargePoint):
 
         # ถ้ามี remote start pending ให้ลบ flag ทิ้ง
         self.pending_remote.pop(int(connector_id), None)
-        pending = self.pending_start.pop(int(connector_id), None) or {}
-
-        tx_id = next(_tx_counter)  # CSMS ออกเลข transactionId
-        # เก็บทั้ง transactionId และ idTag เพื่อให้ API ภายนอกเรียกดูได้
-        pending = self.pending_start.pop(int(connector_id), None)
+        pending = self.pending_start.get(int(connector_id))
         if not pending:
             logging.warning(
                 f"StartTransaction for connector {connector_id} received without pending remote start; rejecting"
@@ -274,9 +270,13 @@ class CentralSystem(ChargePoint):
             await self.unlock_connector(int(connector_id))
             return call_result.StartTransactionPayload(
                 transaction_id=0,
-                id_tag_info={"status": AuthorizationStatus.rejected}
+                id_tag_info={"status": AuthorizationStatus.rejected},
             )
 
+        # มี pending remote start -> pop แล้วสร้าง transaction
+        self.pending_start.pop(int(connector_id), None)
+        tx_id = next(_tx_counter)  # CSMS ออกเลข transactionId
+        # เก็บทั้ง transactionId และ idTag เพื่อให้ API ภายนอกเรียกดูได้
         self.active_tx[int(connector_id)] = {
             "transaction_id": tx_id,
             "id_tag": id_tag,
@@ -601,7 +601,7 @@ async def main():
         """
         คำสั่ง:
           start <cpid> <connector> <idTag>
-          stop  <cpid> <txId>
+          stop  <cpid> <connector|txId>
           ls
           map <cpid>
         """
@@ -632,11 +632,15 @@ async def main():
                 asyncio.run_coroutine_threadsafe(cp.remote_start(connector, idtag), loop)
                 continue
             if parts[0] == "stop" and len(parts) == 3:
-                cpid, txid = parts[1], int(parts[2])
+                cpid, num = parts[1], int(parts[2])
                 cp = connected_cps.get(cpid)
                 if not cp:
                     print("No such CP")
                     continue
+                txid = num
+                session = cp.active_tx.get(num)
+                if session:
+                    txid = session.get("transaction_id", num)
                 asyncio.run_coroutine_threadsafe(cp.remote_stop(txid), loop)
                 continue
             print("Unknown command. Examples: start CP_123 1 TESTTAG | stop CP_123 42 | ls | map CP_123")
