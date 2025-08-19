@@ -72,6 +72,10 @@ class CentralSystem(ChargePoint):
         self.pending_remote: Dict[int, str] = {}
         # เก็บข้อมูลเพิ่มเติมระหว่างรอ StartTransaction (เช่น vid)
         self.pending_start: Dict[int, Dict[str, Any]] = {}
+        # เก็บสถานะล่าสุดของแต่ละ connector
+        self.connector_status: Dict[int, str] = {}
+        # เก็บ task watchdog สำหรับ connector ที่ยังไม่มี session
+        self.no_session_tasks: Dict[int, asyncio.Task] = {}
 
     # เมธอดสั่งเริ่มชาร์จ
     async def remote_start(self, connector_id: int, id_tag: str):
@@ -110,6 +114,33 @@ class CentralSystem(ChargePoint):
             logging.info("RemoteStopTransaction accepted")
         else:
             logging.warning(f"RemoteStopTransaction rejected: {status}")
+
+    async def unlock_connector(self, connector_id: int):
+        """ส่งคำสั่ง UnlockConnector ไปยัง charger"""
+        req = call.UnlockConnectorPayload(connector_id=connector_id)
+        logging.info(f"→ UnlockConnector to {self.id} (connector={connector_id})")
+        resp = await self.call(req)
+        logging.info(f"← UnlockConnector.conf: {resp}")
+        return getattr(resp, "status", None)
+
+    async def _no_session_watchdog(self, connector_id: int, timeout: int = 90):
+        """
+        หากหัวรายงาน Preparing/Occupied แต่ยังไม่มีธุรกรรมภายใน timeout จะปลดล็อกสาย
+        """
+        try:
+            await asyncio.sleep(timeout)
+            status = self.connector_status.get(connector_id)
+            if status in ("Preparing", "Occupied") and connector_id not in self.active_tx:
+                logging.info(
+                    f"No session started for connector {connector_id} after {timeout}s → unlocking"
+                )
+                await self.unlock_connector(connector_id)
+                self.pending_remote.pop(connector_id, None)
+                self.pending_start.pop(connector_id, None)
+        except asyncio.CancelledError:
+            logging.debug(f"Watchdog for connector {connector_id} cancelled")
+        finally:
+            self.no_session_tasks.pop(connector_id, None)
 
     @on(Action.BootNotification)
     async def on_boot_notification(self, charge_point_model, charge_point_vendor, **kwargs):
@@ -178,7 +209,21 @@ class CentralSystem(ChargePoint):
 
     @on(Action.StatusNotification)
     async def on_status_notification(self, connector_id, error_code, status, **kwargs):
-        logging.info(f"← StatusNotification: connector {connector_id} → status={status}, errorCode={error_code}")
+        logging.info(
+            f"← StatusNotification: connector {connector_id} → status={status}, errorCode={error_code}"
+        )
+        c_id = int(connector_id)
+        self.connector_status[c_id] = status
+        # จับเวลาเมื่อหัวอยู่ในสถานะ Preparing/Occupied แต่ยังไม่มีธุรกรรม
+        if status in ("Preparing", "Occupied"):
+            if c_id not in self.active_tx and c_id not in self.no_session_tasks:
+                self.no_session_tasks[c_id] = asyncio.create_task(
+                    self._no_session_watchdog(c_id)
+                )
+        else:
+            task = self.no_session_tasks.pop(c_id, None)
+            if task:
+                task.cancel()
         return call_result.StatusNotificationPayload()
 
     @on(Action.Heartbeat)
@@ -207,13 +252,16 @@ class CentralSystem(ChargePoint):
             logging.warning(
                 f"StartTransaction for connector {connector_id} received without pending remote start; rejecting"
             )
+            await self.unlock_connector(int(connector_id))
+            self.pending_remote.pop(int(connector_id), None)
+            self.pending_start.pop(int(connector_id), None)
             return call_result.StartTransactionPayload(
                 transaction_id=0,
                 id_tag_info={"status": AuthorizationStatus.invalid},
             )
 
         # remote start was expected, remove pending flag
-        self.pending_remote.pop(int(connector_id), None)
+        self.pending_remote.pop(int(connector_id), None))
 
         tx_id = next(_tx_counter)  # CSMS ออกเลข transactionId
         # เก็บทั้ง transactionId และ idTag เพื่อให้ API ภายนอกเรียกดูได้
@@ -222,6 +270,7 @@ class CentralSystem(ChargePoint):
             logging.warning(
                 f"StartTransaction for connector {connector_id} received without pending remote start; rejecting"
             )
+            await self.unlock_connector(int(connector_id))
             return call_result.StartTransactionPayload(
                 transaction_id=0,
                 id_tag_info={"status": AuthorizationStatus.rejected}
@@ -232,6 +281,10 @@ class CentralSystem(ChargePoint):
             "id_tag": id_tag,
             "vid": pending.get("vid"),
         }
+        # ยกเลิก watchdog ถ้ามี
+        task = self.no_session_tasks.pop(int(connector_id), None)
+        if task:
+            task.cancel()
         logging.info(
             f"← StartTransaction from {self.id}: connector={connector_id}, idTag={id_tag}, meterStart={meter_start}, vid={pending.get('vid')}"
         )
@@ -341,6 +394,10 @@ class StopReq(BaseModel):
     hash: str | None = None
 
 class StopByConnectorReq(BaseModel):
+    cpid: str
+    connectorId: int
+
+class ReleaseReq(BaseModel):
     cpid: str
     connectorId: int
 
@@ -460,6 +517,27 @@ async def api_stop_by_connector(req: StopByConnectorReq, x_api_key: str | None =
     try:
         await cp.remote_stop(tx_id)
         return {"ok": True, "transactionId": tx_id, "message": "RemoteStopTransaction sent"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/release")
+async def api_release(req: ReleaseReq, x_api_key: str | None = Header(default=None, alias="X-API-Key")):
+    """ปลดล็อกสายเมื่อยังไม่มีธุรกรรม"""
+    require_key(x_api_key)
+    cp = connected_cps.get(req.cpid)
+    if not cp:
+        raise HTTPException(status_code=404, detail=f"ChargePoint '{req.cpid}' not connected")
+    if req.connectorId in cp.active_tx:
+        raise HTTPException(status_code=400, detail="Connector has active transaction")
+    task = cp.no_session_tasks.pop(req.connectorId, None)
+    if task:
+        task.cancel()
+    cp.pending_remote.pop(req.connectorId, None)
+    cp.pending_start.pop(req.connectorId, None)
+    try:
+        await cp.unlock_connector(req.connectorId)
+        return {"ok": True, "message": "UnlockConnector sent"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
