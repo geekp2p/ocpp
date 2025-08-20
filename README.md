@@ -1,281 +1,106 @@
-# OCPP Central Server
+# ChargeForge Simulator
 
-โปรเจกต์นี้ประกอบด้วยตัวอย่าง **CSMS (Central System)** สำหรับโปรโตคอล OCPP 1.6 พร้อม HTTP API และเครื่องมือช่วยทดสอบ/ดีบักที่เกี่ยวข้อง
+Simulates an OCPP 1.6J charge point that talks JSON over WebSocket. The
+simulator has been exercised against the [Gresgying 120 kW–180 kW DC charging
+station](https://www.gresgying.global/product/120kw-180kw-dc-charging-station.html)
+and is intended for validating backend integrations. A reference CSMS
+implementation is provided in [`HowToUse.me`](HowToUse.me), which shows how to
+run the `central.py` server from the
+[geekp2p/ocpp](https://github.com/geekp2p/ocpp) project when testing with real
+hardware.
 
-## โครงสร้างหลัก
+## ✅ Current features
 
-- `central.py` – เซิร์ฟเวอร์ WebSocket/HTTP API ที่รวมฟังก์ชัน Remote Start/Stop และคอนโซลคำสั่งเบื้องต้น
-- `start_stop.go` – โค้ด Go ที่เรียก HTTP API `/api/v1/start`, `/charge/stop` หรือ `/api/v1/stop` เมื่อระบุ `transactionId`
-- `list_active.go` – ตัวอย่าง Go สำหรับดึง `cpid`, `connectorId`, `idTag`, `transactionId` ของธุรกรรมที่กำลังชาร์จอยู่จาก `/api/v1/active`
-- `list_active.py` – สคริปต์ Python สำหรับเรียกดู `cpid`, `connectorId`, `idTag`, `transactionId` ที่กำลังเชื่อมต่อ
-- `cp_simulator.py` – ตัวจำลองหัวชาร์จอย่างง่ายสำหรับเชื่อมต่อทดสอบ
-- `windows_fw_diagnose.py` – สคริปต์ PowerShell/Python สำหรับตรวจ/แก้ไข Windows Firewall
+- RemoteStart/RemoteStop with transactionId tracking per connector
+- `/health` endpoint and Docker healthcheck
+- Reconnect/backoff logic when the CSMS connection drops
+- Basic state machine: Available → Preparing → Charging → Finishing → Available
+- Periodic MeterValues with Wh increasing by a fixed rate
+- HTTP control endpoints: `/plug/{cid}`, `/unplug/{cid}`, `/local_start/{cid}`, `/local_stop/{cid}`
+- Uses the `ocpp` Python package with `subprotocols=['ocpp1.6']` for JSON over WebSocket
 
-## เตรียมสภาพแวดล้อม
+## 📋 Roadmap / Next Tasks
 
-### Python
-```bash
-conda env create -f environment.yml  # หรือ pip install -r requirements.txt
-conda activate ocpp-central
-```
+### 🔶 Core robustness
+- [ ] **Multi-connector concurrency**: ให้ทุก connector เริ่ม/หยุดพร้อมกันได้จริง (ไม่แย่ง state กัน)
+  - Acceptance: สั่ง remote start ที่ connector 1 และ 2 พร้อมกัน → ทั้งสองขึ้น Charging; stop เส้นใดเส้นหนึ่งไม่กระทบอีกเส้น
+  - Implementation hints:
+    - ตรวจโค้ด `send_meter_loop()` วนเฉพาะ `session_active=True` ต่อ connector (OK)
+    - ยืนยันว่า `on_remote_stop()` และ `/local_stop/{cid}` เลือก `txId` ของ **cid นั้น** เท่านั้น
+    - (ทางเลือก) ทำ **per-connector meter task** เพื่อแยกคาบได้อิสระ
 
-### Go (สำหรับทดสอบ start/stop)
-ติดตั้ง Go 1.20 ขึ้นไป จากนั้นสามารถรัน/คอมไพล์ได้ด้วย
-```bash
-go run start_stop.go
-# หรือ
-go build start_stop.go
-```
+- [ ] **Fault & Suspended states simulation**
+  - Endpoints ที่ควรเพิ่ม:
+    - `POST /fault/{cid}?code=GroundFailure` → ส่ง `StatusNotification(errorCode=GroundFailure, status=Faulted)`
+    - `POST /suspend_ev/{cid}` / `POST /suspend_evse/{cid}` / `POST /resume/{cid}`
+  - Acceptance: เรียก fault แล้ว CSMS เห็นสถานะ Faulted; resume กลับสู่ Charging/Available ได้
 
-## การใช้งาน `central.py`
+- [ ] **Metering fluctuations & extra measurands**
+  - ENV เสนอ: `NOISE_W_PERCENT=5`, `EXTRA_MEASURANDS="Voltage,Current.Import,Power.Active.Import"`
+  - ปรับ `send_meter_loop()` ให้เพิ่ม jitter (±NOISE%) และแนบ `Voltage/Current/Power` ใน `sampledValue`
+  - Acceptance: ค่า Wh/Power/Voltage/Current ไม่คงที่ทุกคาบ; CSMS รับค่าถูกต้อง
 
-รันเซิร์ฟเวอร์
-```bash
-python central.py
-```
-เซิร์ฟเวอร์จะเปิด
-- WebSocket OCPP1.6 ที่ `ws://<host>:9000/ocpp/<ChargePointID>`
-- HTTP API ที่ `http://<host>:8080`
+### 🔒 Transport & Ops
+- [ ] **WSS/TLS support**
+  - ENV เสนอ:  
+    `OCPP_WSS=true`, `SSL_VERIFY=true|false`, `CA_CERT=/certs/ca.pem`, `CLIENT_CERT=/certs/client.crt`, `CLIENT_KEY=/certs/client.key`
+  - สร้าง `ssl.SSLContext` แล้วส่งให้ `websockets.connect(..., ssl=ctx)`
+  - Acceptance: เชื่อม `wss://` กับ CSMS ที่เปิด TLS ได้; healthcheck ยัง green
 
-ตัวอย่างส่วนของ API:
-- `POST /api/v1/start` ส่งคำสั่ง RemoteStartTransaction ให้หัวชาร์จที่เชื่อมต่ออยู่
-- `POST /charge/stop` หยุดชาร์จโดยระบุ `cpid` และ `connectorId` (ไม่ต้องทราบ transactionId)
-- `POST /api/v1/stop` หยุดชาร์จโดยส่ง `transactionId`
-- `GET /api/v1/active` คืนรายการ `cpid`, `connectorId`, `idTag`, `transactionId` ที่กำลังมีธุรกรรมอยู่
-ทุกเอ็นด์พอยต์ต้องใส่ header `X-API-Key` (ค่าเริ่มต้นคือ `changeme-123`).
+- [ ] **/metrics (Prometheus) & /info**
+  - `/metrics`: จำนวน sessions, energy ต่อ connector, error count
+  - `/info`: dump คอนฟิก+สถานะคร่าว ๆ (cpid, connectors, active sessions)
 
-### ตัวอย่างเรียกด้วย `curl`
+### 🧪 Quality & Future
+- [ ] **Integration tests (pytest)**
+  - เทส flow: plug → local_start → มี MeterValues > 0 → local_stop → กลับ Available
+  - (ถ้าสะดวก) รันคู่กับ CSMS จริงใน compose (service แยก) หรือ mock transport
+- [ ] **OCPP 2.0.1 mode (optional/backlog)**  
+  - ใส่ flag ใน `config.py` แต่ปักหมุด backlog ได้ หากยังใช้ 1.6J เป็นหลัก
 
-#### 1. ใช้ `vid` อย่างเดียว
+### Requirements
+- Python 3.10+ (ทดสอบกับ 3.12)
+- ติดตั้ง dependencies ใน `sim/requirements.txt` (โดยใช้ `ocpp` 0.26.0 รองรับ OCPP 1.6J ผ่าน WebSocket)
 
-```bash
-curl -X POST http://<host>:8080/api/v1/start_vid \
-  -H "X-API-Key: changeme-123" \
-  -H "Content-Type: application/json" \
-  -d '{"vid":"1.2"}'
+### การใช้งาน how to use
 
-curl -X POST http://<host>:8080/api/v1/stop_vid \
-  -H "X-API-Key: changeme-123" \
-  -H "Content-Type: application/json" \
-  -d '{"vid":"1.2"}'
-```
+# HowToUse
 
-#### 2. ระบุ `cpid`/`connectorId` และ argument เพิ่มเติม
+Instructions for running the reference `central.py` server from [geekp2p/ocpp](https://github.com/geekp2p/ocpp) and testing it with the Gresgying 120 kW–180 kW DC charging station or the ChargeForge simulator.
 
-```bash
-curl -X POST http://<host>:8080/api/v1/start \
-  -H "X-API-Key: changeme-123" \
-  -H "Content-Type: application/json" \
-  -d '{"cpid":"CP_001","connectorId":1,"idTag":"TAG_1234","vid":"1.2","kv":"mode=fast,tag=special"}'
+## 1. Setup `central.py`
+1. Clone the project and save the provided `central.py`.
+2. Install dependencies (Python 3.10+):
+   ```bash
+   pip install ocpp==0.26.0 websockets fastapi uvicorn
+   ```
+3. Start the CSMS:
+   ```bash
+   python central.py
+   ```
+   The server listens on `ws://0.0.0.0:9000/ocpp/<ChargePointID>` and exposes an HTTP API on `http://0.0.0.0:8080`.
 
-curl -X POST http://<host>:8080/api/v1/stop \
-  -H "X-API-Key: changeme-123" \
-  -H "Content-Type: application/json" \
-  -d '{"cpid":"CP_001","connectorId":1,"transactionId":3,"vid":"1.2","kv":"mode=fast,tag=special"}'
-`
+## 2. Test with ChargeForge Simulator
+1. Install simulator deps:
+   ```bash
+   pip install -r sim/requirements.txt
+   ```
+2. Start the simulator (connects to `ws://127.0.0.1:9000/ocpp` by default):
+   ```bash
+   python sim/evse.py
+   ```
+3. Use the CSMS HTTP API to control charging:
+   ```bash
+   curl -X POST -H 'X-API-Key: changeme-123' \
+     -H 'Content-Type: application/json' \
+     -d '{"cpid":"TestCP01","connectorId":1}' \
+     http://localhost:8080/api/v1/start
+   ```
+   Use `/api/v1/stop` or `/api/v1/active` in a similar way. The simulator will report MeterValues and status updates.
 
-บนคอนโซลที่รัน `central.py` สามารถสั่งได้ เช่น
-```
-start CP_001 1 TAG_1234  # เริ่มชาร์จ
-stop CP_001 3           # หยุดชาร์จโดยใช้ transactionId 3
-ls                      # แสดง CP ที่เชื่อมต่อ
-```
+## 3. Connecting a real Gresgying charger
+1. Configure the charger to use WebSocket URL `ws://<csms-host>:9000/ocpp/<ChargePointID>` with OCPP 1.6J.
+2. If the charger supports remote operations, invoke `/api/v1/start` and `/api/v1/stop` as above. Default API key: `changeme-123` (change it in `central.py`).
+3. Monitor logs from `central.py` for BootNotification, StatusNotification, StartTransaction and StopTransaction events.
 
-## การใช้งาน `start_stop.go`
-
-ไฟล์ Go นี้ใช้เรียก HTTP API `/api/v1/start`, `/charge/stop` หรือ `/api/v1/stop` จากระยะไกล โดยค่าเริ่มต้นจะชี้ไปยัง `http://45.136.236.186:8080` สามารถปรับ `apiBase` หรือ `apiKey` ในไฟล์ได้ตามต้องการ นอกจากนี้สคริปต์จะเพิ่ม timestamp ปัจจุบันและค่า hash แบบ SHA-256 ลงในคำขอโดยอัตโนมัติ เพื่อให้เซิร์ฟเวอร์ตรวจสอบความถูกต้องได้
-
-ตัวอย่างคำสั่ง:
-```bash
-# เริ่มชาร์จด้วย cpid/connectorId (idTag, transactionId, vid และ kv เป็นออปชัน)
-go run start_stop.go start <cpid> <connectorId> [idTag] [transactionId] [vid] [kv]
-
-# หยุดชาร์จโดยระบุ cpid และ connectorId (หรือเพิ่ม idTag/transactionId/vid/kv)
-go run start_stop.go stop <cpid> <connectorId> [idTag] [transactionId] [vid] [kv]
-
-# ตัวอย่างสั้นที่สุด (ใช้ค่า idTag ดีฟอลต์ และ /charge/stop)
-go run start_stop.go start CP_001 1
-go run start_stop.go stop  CP_001 1
-
-# เริ่มชาร์จพร้อม idTag และ vid
-go run start_stop.go start CP_001 1 TAG_1234 3 1.2
-
-# เริ่มชาร์จพร้อม vid และ kv หลายค่า
-go run start_stop.go start CP_001 1 TAG_1234 3 1.2 mode=fast,tag=special
-
-# หยุดชาร์จโดยใช้ transactionId และ vid
-go run start_stop.go stop  CP_001 1 TAG_1234 3 1.2
-```
-หากได้รับ `context deadline exceeded` แสดงว่าไม่สามารถเชื่อมต่อถึงเซิร์ฟเวอร์ (อาจเพราะเซิร์ฟเวอร์ไม่ทำงานหรือถูกไฟร์วอลล์บล็อก).
-
-### รูปแบบข้อมูล/แฮช สำหรับคำสั่ง Start/Stop
-
-ทั้ง `POST /api/v1/start` และ `POST /api/v1/stop` รองรับการตรวจสอบ `hash` โดยประกอบ canonical string ตามลำดับดังนี้:
-
-```
-1: <cpid>
-2: <connectorId>
-3: <idTag-or-'-'>
-4: <transactionId-or-'-'>
-5: <timestamp-or-'-'>     # ใช้รูปแบบ UNIX: unix:<sec[.frac]>
-6: <vid-or-'-'>
-7: <kv-or-'-'>            # key=value[,key=value]*  (ตัดคีย์ hash ออกตอนคำนวณ)
-8: <hash-or-'-'>          # SHA-256 hex ของ canonical string
-```
-
-canonical string ที่นำไปคำนวณ hash คือ
-
-```
-<cpid>|<connectorId>|<idTag-or-'-'>|<transactionId-or-'-'>|<timestamp-or-'-'>|<vid-or-'-'>|<kv-or-'-'>
-```
-
-ค่าที่ไม่ส่งให้แทนด้วย `-` และ `kv` จะถูกเรียงตามชื่อ key (ละเว้น key `hash`) ก่อนนำมาประกอบ canonical string แล้วจึงคำนวณค่า `hash` ด้วย SHA-256.
-
-#### ตัวอย่างรูปแบบก่อนมี `vid`/`kv` (ฟิลด์ 1–5)
-
-**Payload**
-```json
-{
-  "cpid": "CP_001",
-  "connectorId": 1,
-  "idTag": "TAG_1234",
-  "transactionId": 3,
-  "timestamp": "unix:1700000000",
-  "hash": "cb0d4e8db44d6dbd585867fc7fd2fe85f75eaba7e659972504baecb1f3a5a9f6"
-}
-```
-
-**Canonical string**
-```
-CP_001|1|TAG_1234|3|unix:1700000000
-```
-SHA-256
-```
-cb0d4e8db44d6dbd585867fc7fd2fe85f75eaba7e659972504baecb1f3a5a9f6
-```
-
-#### ตัวอย่างรูปแบบปัจจุบัน (ฟิลด์ 1–7 + hash)
-
-**Payload**
-```json
-{
-  "cpid": "CP_001",
-  "connectorId": 1,
-  "idTag": "TAG_1234",
-  "transactionId": 3,
-  "timestamp": "unix:1700000000",
-  "vid": "1.2",
-  "kv": "mode=fast,tag=special",
-  "hash": "cfcd214c6749f37c238783cae0565e29d9919b72b002b39fa1f360a0bc2f1b9f"
-}
-```
-
-**Canonical string**
-```
-CP_001|1|TAG_1234|3|unix:1700000000|1.2|mode=fast,tag=special
-```
-SHA-256
-```
-cfcd214c6749f37c238783cae0565e29d9919b72b002b39fa1f360a0bc2f1b9f
-```
-
-## การใช้งาน `cp_simulator.py`
-
-สคริปต์นี้จำลองหัวชาร์จ ID `CP_001` และเชื่อมต่อไปยังเซิร์ฟเวอร์ที่ `ws://45.136.236.186:9000/ocpp/CP_001` เพื่อใช้ทดสอบคำสั่ง Start/Stop จาก API
-```bash
-python cp_simulator.py
-```
-เมื่อเห็น log ว่าเชื่อมต่อสำเร็จแล้ว จึงค่อยเรียก `start_stop.go` หรือ HTTP API `/api/v1/start`, `/charge/stop` หรือ `/api/v1/stop`
-
-## ตรวจสอบไฟร์วอลล์บน Windows
-
-สำหรับ Windows Server 2022/2025 หรือ Windows 10/11 สามารถใช้สคริปต์ `windows_fw_diagnose.py` เพื่อเช็กหรือเปิดพอร์ตได้
-```bash
-python windows_fw_diagnose.py --ip 45.136.236.186 --port 8080 --path /api/v1/health
-# เพิ่มกฎ Allow inbound
-python windows_fw_diagnose.py --ip 45.136.236.186 --port 9000 --fix allow-in
-```
-หรือสร้างกฎด้วยตนเอง
-```powershell
-netsh advfirewall firewall add rule name="Allow OCPP 9000" dir=in action=allow protocol=TCP localport=9000
-```
-
-## หมายเหตุ
-- เปลี่ยนค่า `API_KEY` ใน `central.py` และ `apiKey` ใน `start_stop.go` ก่อนใช้งานจริง
-
-# รายการงาน (Checklist)
-
-## สิ่งที่ทำไปแล้ว
-- เตรียมสภาพแวดล้อม Python (environment.yml, requirements.txt)
-- พัฒนาเซิร์ฟเวอร์ central.py พร้อม HTTP API และ WebSocket
-- เพิ่มสคริปต์ start_stop.go, list_active.go/py สำหรับควบคุมและติดตามธุรกรรม
-- สร้าง cp_simulator.py สำหรับทดสอบการเชื่อมต่อและการเริ่ม/หยุดชาร์จ
-- เตรียมสคริปต์ windows_fw_diagnose.py เพื่อจัดการไฟร์วอลล์บน Windows
-- บันทึกการใช้งานและตัวอย่างไว้ใน README.md
-
-## สิ่งที่ต้องทำเพิ่ม
-- รองรับ DataTransfer ใน central.py เพื่อจัดการข้อความเพิ่มเติมจากหัวชาร์จ
-- เพิ่มชุดทดสอบอัตโนมัติ (unit tests) และการตั้งค่า CI
-- ปรับปรุงเอกสารให้ครอบคลุมการใช้งาน cp_simulator.py และ HTTP API
-- เสริมมาตรการความปลอดภัย เช่น ปรับเปลี่ยน API_KEY และการยืนยันตัวตนอื่น ๆ
-
-## ตัวอย่าง
-
-# Examples for Sending Start/Stop Commands
-
-This document shows how to call the HTTP APIs or the `start_stop.go` helper in
-several ways. Adjust `<host>` to your server address and update `apiKey` in the
-source code if necessary.
-
-## 1. Start/Stop with CPID and connector only
-
-These commands use the default `idTag` and do not supply a transaction ID. The
-stop request automatically falls back to `/charge/stop`.
-
-```bash
-# start
-go run start_stop.go start CP_001 1
-# stop
-go run start_stop.go stop  CP_001 1
-```
-
-## 2. Start/Stop with custom idTag and transactionId
-
-Specify additional fields to target a specific transaction.
-
-```bash
-# start with custom idTag and transactionId
-go run start_stop.go start CP_001 1 TAG_1234 10
-# stop using the same values
-go run start_stop.go stop  CP_001 1 TAG_1234 10
-```
-
-## 3. HTTP start/stop using only a vehicle identifier (VID)
-
-Use cURL to call the dedicated endpoints when you only know the VID.
-
-```bash
-curl -X POST http://<host>:8080/api/v1/start_vid \
-  -H "X-API-Key: changeme-123" \
-  -H "Content-Type: application/json" \
-  -d '{"vid":"1.2"}'
-
-curl -X POST http://<host>:8080/api/v1/stop_vid \
-  -H "X-API-Key: changeme-123" \
-  -H "Content-Type: application/json" \
-  -d '{"vid":"1.2"}'
-```
-
-## 4. Stop by CPID and connector with known transactionId
-
-When the transaction ID is known, the CLI will call `/api/v1/stop` instead of
-`/charge/stop`.
-
-```bash
-# stop by transactionId only
-go run start_stop.go stop CP_001 1 - 10
-```
-
-The placeholder `-` is used for `idTag` to indicate that only the
-transaction ID is supplied.
-
+This setup has been validated with a Gresgying 120 kW–180 kW DC charging station using OCPP 1.6J over WebSocket.

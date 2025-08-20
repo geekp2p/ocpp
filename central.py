@@ -261,33 +261,25 @@ class CentralSystem(ChargePoint):
             )
 
         # ถ้ามี remote start pending ให้ลบ flag ทิ้ง
+        pending = self.pending_start.pop(int(connector_id), None)
         self.pending_remote.pop(int(connector_id), None)
-        pending = self.pending_start.get(int(connector_id))
-        if not pending:
-            logging.warning(
-                f"StartTransaction for connector {connector_id} received without pending remote start; rejecting"
-            )
-            await self.unlock_connector(int(connector_id))
-            return call_result.StartTransactionPayload(
-                transaction_id=0,
-                id_tag_info={"status": AuthorizationStatus.rejected},
-            )
 
-        # มี pending remote start -> pop แล้วสร้าง transaction
-        self.pending_start.pop(int(connector_id), None)
+        # ไม่บังคับว่าต้องมี pending start เสมอ: รองรับ local start หรือ remote start ที่ไม่ได้ผ่าน API
         tx_id = next(_tx_counter)  # CSMS ออกเลข transactionId
-        # เก็บทั้ง transactionId และ idTag เพื่อให้ API ภายนอกเรียกดูได้
-        self.active_tx[int(connector_id)] = {
+        info = {
             "transaction_id": tx_id,
             "id_tag": id_tag,
-            "vid": pending.get("vid"),
         }
+        if pending and "vid" in pending:
+            info["vid"] = pending["vid"]
+        # เก็บทั้ง transactionId และข้อมูลอื่นเพื่อให้ API ภายนอกเรียกดูได้
+        self.active_tx[int(connector_id)] = info
         # ยกเลิก watchdog ถ้ามี
         task = self.no_session_tasks.pop(int(connector_id), None)
         if task:
             task.cancel()
         logging.info(
-            f"← StartTransaction from {self.id}: connector={connector_id}, idTag={id_tag}, meterStart={meter_start}, vid={pending.get('vid')}"
+            f"← StartTransaction from {self.id}: connector={connector_id}, idTag={id_tag}, meterStart={meter_start}, vid={info.get('vid')}"
         )
         logging.info(f"→ Assign transactionId={tx_id}")
         return call_result.StartTransactionPayload(
@@ -451,6 +443,8 @@ async def api_start(req: StartReq, x_api_key: str | None = Header(default=None, 
             cp.pending_start.pop(int(req.connectorId), None)
         # ถ้า charger รับ จะตามด้วย StartTransaction.req → เราจะ assign transactionId ให้เอง
         return {"ok": True, "hash": expected_hash, "message": "RemoteStartTransaction sent"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -499,9 +493,13 @@ async def api_stop(req: StopReq, x_api_key: str | None = Header(default=None, al
             if session:
                 tx_id = session.get("transaction_id")
         if tx_id is None:
+            if req.connectorId is not None:
+                await cp.unlock_connector(req.connectorId)
             raise HTTPException(status_code=404, detail="No matching active transaction")
         await cp.remote_stop(tx_id)
         return {"ok": True, "transactionId": tx_id, "hash": expected_hash, "message": "RemoteStopTransaction sent"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -518,6 +516,8 @@ async def api_stop_by_connector(req: StopByConnectorReq, x_api_key: str | None =
     try:
         await cp.remote_stop(tx_id)
         return {"ok": True, "transactionId": tx_id, "message": "RemoteStopTransaction sent"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -539,6 +539,8 @@ async def api_release(req: ReleaseReq, x_api_key: str | None = Header(default=No
     try:
         await cp.unlock_connector(req.connectorId)
         return {"ok": True, "message": "UnlockConnector sent"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -637,11 +639,20 @@ async def main():
                 if not cp:
                     print("No such CP")
                     continue
-                txid = num
                 session = cp.active_tx.get(num)
                 if session:
                     txid = session.get("transaction_id", num)
-                asyncio.run_coroutine_threadsafe(cp.remote_stop(txid), loop)
+                    asyncio.run_coroutine_threadsafe(cp.remote_stop(txid), loop)
+                    continue
+                tx_match = None
+                for info in cp.active_tx.values():
+                    if info.get("transaction_id") == num:
+                        tx_match = num
+                        break
+                if tx_match is not None:
+                    asyncio.run_coroutine_threadsafe(cp.remote_stop(tx_match), loop)
+                else:
+                    asyncio.run_coroutine_threadsafe(cp.unlock_connector(num), loop)
                 continue
             print("Unknown command. Examples: start CP_123 1 TESTTAG | stop CP_123 42 | ls | map CP_123")
 

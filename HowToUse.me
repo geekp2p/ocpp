@@ -1,0 +1,40 @@
+# HowToUse
+
+Instructions for running the reference `central.py` server from [geekp2p/ocpp](https://github.com/geekp2p/ocpp) and testing it with the Gresgying 120 kW–180 kW DC charging station or the ChargeForge simulator.
+
+## 1. Setup `central.py`
+1. Clone the project and save the provided `central.py`.
+2. Install dependencies (Python 3.10+):
+   ```bash
+   pip install ocpp==0.26.0 websockets fastapi uvicorn
+   ```
+3. Start the CSMS:
+   ```bash
+   python central.py
+   ```
+   The server listens on `ws://0.0.0.0:9000/ocpp/<ChargePointID>` and exposes an HTTP API on `http://0.0.0.0:8080`.
+
+## 2. Test with ChargeForge Simulator
+1. Install simulator deps:
+   ```bash
+   pip install -r sim/requirements.txt
+   ```
+2. Start the simulator (connects to `ws://127.0.0.1:9000/ocpp` by default):
+   ```bash
+   python sim/evse.py
+   ```
+3. Use the CSMS HTTP API to control charging:
+   ```bash
+   curl -X POST -H 'X-API-Key: changeme-123' \
+     -H 'Content-Type: application/json' \
+     -d '{"cpid":"TestCP01","connectorId":1}' \
+     http://localhost:8080/api/v1/start
+   ```
+   Use `/api/v1/stop` or `/api/v1/active` in a similar way. The simulator will report MeterValues and status updates.
+
+## 3. Connecting a real Gresgying charger
+1. Configure the charger to use WebSocket URL `ws://<csms-host>:9000/ocpp/<ChargePointID>` with OCPP 1.6J.
+2. If the charger supports remote operations, invoke `/api/v1/start` and `/api/v1/stop` as above. Default API key: `changeme-123` (change it in `central.py`).
+3. Monitor logs from `central.py` for BootNotification, StatusNotification, StartTransaction and StopTransaction events.
+
+This setup has been validated with a Gresgying 120 kW–180 kW DC charging station using OCPP 1.6J over WebSocket.

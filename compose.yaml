@@ -1,0 +1,17 @@
+services:
+  chargeforge-sim:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: chargeforge-sim
+    env_file:
+      - .env
+    ports:
+      - "7071:7071"   # HTTP control endpoints (simulate plug/unplug, start/stop)
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7071/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
